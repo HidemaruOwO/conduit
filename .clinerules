@@ -5,7 +5,15 @@ When starting work on this project:
 1. First, read and understand the codebase by exploring the directory structure
 2. Use `tree` command excluding large directories (node_modules, etc.)
 3. Read `docs/llm-context.md` to understand previous learnings about the project
-4. Summarize your understanding of the project structure and purpose
-5. Update `docs/llm-context.md` with new insights when completing tasks
+4. **Read `docs/architecture.md` as the primary project specification** - this document contains the complete technical specification, feature requirements, and implementation guidelines that must be followed
+5. Summarize your understanding of the project structure and purpose
+6. Update `docs/llm-context.md` with new insights when completing tasks
 
-Always maintain context about the project's architecture and purpose.
+## Implementation Rules
+
+- **Always follow `docs/architecture.md`** - this is the authoritative project specification and must be adhered to for all implementation decisions
+- All code implementation must align with the architecture, specifications, and requirements defined in `docs/architecture.md`
+- When adding new features or making changes, ensure they comply with the design patterns, coding standards, and technical requirements outlined in the architecture document
+- If there are conflicts between ad-hoc requests and the architecture document, prioritize the architecture document and clarify with the user
+
+Always maintain context about the project's architecture and purpose as defined in the specification.
