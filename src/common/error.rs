@@ -22,6 +22,10 @@ pub enum Error {
     #[error("TLS error: {0}")]
     Tls(String),
 
+    /// Security-related errors
+    #[error("Security error: {0}")]
+    Security(String),
+
     /// Authentication errors
     #[error("Authentication error: {0}")]
     Authentication(String),
@@ -61,6 +65,11 @@ impl Error {
     /// Create a new TLS error
     pub fn tls(msg: impl Into<String>) -> Self {
         Error::Tls(msg.into())
+    }
+
+    /// Create a new security error
+    pub fn security(msg: impl Into<String>) -> Self {
+        Error::Security(msg.into())
     }
 
     /// Create a new authentication error
