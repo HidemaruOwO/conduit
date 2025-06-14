@@ -1,0 +1,37 @@
+# Rust のビルド成果物
+/target/
+Cargo.lock
+
+# IDE/エディタファイル
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS生成ファイル
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ログファイル
+*.log
+
+# 環境設定ファイル
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Rust固有
+**/*.rs.bk
+*.pdb
+
+# テスト関連
+/target/
+/Cargo.lock

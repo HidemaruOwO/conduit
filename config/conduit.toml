@@ -1,0 +1,30 @@
+# Conduit configuration file
+# This is a sample configuration showing how to set up tunnels
+
+# Router server configuration
+[router]
+host = "10.2.0.1"    # Router IP address (same subnet as router)
+port = 9999          # Router listening port
+
+# Security configuration
+[security]
+private_key_path = "./keys/client.key"  # Client private key path
+
+# Tunnel configurations
+# Each [[tunnels]] section defines one tunnel
+
+[[tunnels]]
+name = "web-server-access"       # Tunnel identifier name
+source = "10.2.0.2:8080"        # Router-side service address and port
+bind = "0.0.0.0:80"             # Client bind address (external users connect here)
+# protocol = "tcp"               # Protocol (tcp or udp, default: tcp)
+
+[[tunnels]]
+name = "api-server-access"
+source = "10.2.0.3:3000"        # Another router-side service
+bind = "0.0.0.0:8080"
+
+[[tunnels]]
+name = "database-access"
+source = "10.2.0.4:5432"        # Database on router side
+bind = "127.0.0.1:5432"         # Local database access
