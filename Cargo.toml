@@ -28,6 +28,8 @@ tokio-rustls = "0.24"
 
 # TLS・暗号化
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
+rustls-pemfile = "1.0"
+webpki-roots = "0.25"
 ed25519-dalek = { version = "2.0", features = ["rand_core"] }
 ring = "0.17"
 rand = "0.8"

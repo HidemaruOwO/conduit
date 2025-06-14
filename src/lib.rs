@@ -6,6 +6,7 @@ pub mod cli;
 pub mod client;
 pub mod router;
 pub mod common;
+pub mod security;
 
 pub use common::{
     config::Config,

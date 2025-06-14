@@ -482,6 +482,7 @@ dependencies = [
  "reqwest",
  "ring",
  "rustls",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "sysinfo 0.29.11",
@@ -498,6 +499,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "vergen",
+ "webpki-roots",
 ]
 
 [[package]]
