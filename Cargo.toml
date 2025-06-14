@@ -1,0 +1,107 @@
+[package]
+name = "conduit"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.70"
+authors = ["HidemaruOwO <owner@v-sli.me>"]
+description = "High-performance network tunneling software"
+documentation = "https://docs.rs/conduit"
+homepage = "https://github.com/HidemaruOwO/conduit"
+repository = "https://github.com/HidemaruOwO/conduit"
+license = "Apache-2.0"
+keywords = ["tunnel", "network", "proxy", "security", "tls"]
+categories = ["network-programming", "command-line-utilities"]
+readme = "README.md"
+exclude = [
+    "/.github/",
+    "/docs/",
+    "/scripts/",
+    "/benches/",
+    "/examples/",
+    "*.log"
+]
+
+[dependencies]
+# 非同期ランタイム
+tokio = { version = "1.35", features = ["full"] }
+tokio-rustls = "0.24"
+
+# TLS・暗号化
+rustls = { version = "0.21", features = ["dangerous_configuration"] }
+ed25519-dalek = { version = "2.0", features = ["rand_core"] }
+ring = "0.17"
+rand = "0.8"
+
+# CLI
+clap = { version = "4.4", features = ["derive", "color", "suggestions"] }
+
+# 設定・シリアライゼーション
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+serde_json = "1.0"
+bincode = "1.3"
+
+# エラーハンドリング
+anyhow = "1.0"
+thiserror = "1.0"
+
+# ログ・トレーシング
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+
+# ユーティリティ
+uuid = { version = "1.6", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+dashmap = "5.5"
+base64 = "0.21"
+
+# ネットワーク・HTTP (P1機能用)
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false, optional = true }
+axum = { version = "0.7", features = ["ws", "macros"], optional = true }
+tower = { version = "0.4", features = ["timeout", "limit"], optional = true }
+tower-http = { version = "0.5", features = ["cors", "compression-gzip"], optional = true }
+
+# メトリクス・監視 (P1機能用)
+prometheus = { version = "0.13", features = ["process"], optional = true }
+sysinfo = { version = "0.29", optional = true }
+
+[build-dependencies]
+vergen = { version = "8.2", features = ["build", "git", "gitcl", "cargo", "rustc", "sysinfo"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockall = "0.12"
+tempfile = "3.8"
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.4"
+
+[[bin]]
+name = "conduit"
+path = "src/main.rs"
+
+[lib]
+name = "conduit"
+path = "src/lib.rs"
+
+# 機能フラグ
+[features]
+default = []
+api = ["axum", "tower", "tower-http"]
+metrics = ["prometheus", "sysinfo"]
+webhooks = ["reqwest"]
+
+[profile.dev]
+opt-level = 0
+debug = true
+debug-assertions = true
+overflow-checks = true
+
+[profile.release]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = "thin"
+panic = "abort"
+strip = true
