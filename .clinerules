@@ -26,3 +26,39 @@ Always maintain context about the project's architecture and purpose as defined 
 
 - **After receiving tool results, carefully reflect on their quality and determine optimal next steps before proceeding.** Use your thinking to plan and iterate based on this new information, and then take the best next action.
 - **For maximum efficiency, whenever you need to perform multiple independent operations, invoke all relevant tools simultaneously rather than sequentially.**
+
+# Comment Writing Rules
+
+## Comment Format
+- Use language-standard comment symbols (JavaScript/TypeScript: `//`, Python: `#`, etc.)
+- Non-standard symbols like `///` are prohibited
+- All comments must be written in Japanese
+- Translate English comments to Japanese
+
+## Comment Content Rules
+
+### Comments to Include
+- **Why the code was written** - reasons and background
+- Business logic and rule explanations
+- External dependencies and constraint explanations
+- Important notes for future developers
+- Performance and security considerations
+- Intent and purpose of complex algorithms
+
+### Prohibited Comments
+- Comments that simply describe what the code does
+- Simple descriptions of implementation details
+- Obviously unnecessary explanations
+- Outdated or incorrect information
+- Descriptions of content obviously clear from variable or function names
+
+## Comment Quality Standards
+- Write only information that can be understood without reading the code
+- Focus on "why" rather than "what"
+- Include only information that remains valid even when implementation changes
+- Use concise and specific expressions
+
+## Format Rules
+- Place appropriate blank lines before and after comments
+- Match indentation to code level
+- Use consistent notation for multi-line comments
