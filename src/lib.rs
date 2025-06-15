@@ -6,6 +6,7 @@ pub mod cli;
 pub mod client;
 pub mod router;
 pub mod common;
+pub mod protocol;
 pub mod security;
 
 pub use common::{
