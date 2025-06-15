@@ -4,37 +4,232 @@
 //! and manages tunnels for forwarding traffic.
 
 pub mod tunnel;
+pub mod connection;
+pub mod config;
+
+pub use config::{ClientConfig, ClientInfo, RouterConfig, ConnectionSettings, TunnelConfig};
+pub use connection::{ConnectionManager, ConnectionConfig, ConnectionEvent, ConnectionStats};
+pub use tunnel::TunnelManager;
 
 use crate::common::error::Result;
-
-/// Client configuration
-pub struct ClientConfig {
-    /// Router address to connect to
-    pub router_addr: std::net::SocketAddr,
-    /// Private key path for authentication
-    pub private_key_path: std::path::PathBuf,
-}
+use crate::security::{TlsClientConfig, AuthManager};
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use tracing::{info, error, instrument};
 
 /// Conduit client
 pub struct Client {
     config: ClientConfig,
+    tunnel_manager: TunnelManager,
+    connection_manager: Option<ConnectionManager>,
 }
 
 impl Client {
     /// Create a new client
-    pub fn new(config: ClientConfig) -> Self {
-        Self { config }
+    pub fn new(config: ClientConfig) -> Result<Self> {
+        // TLS設定を作成
+        let tls_config = TlsClientConfig::new(&config.security.tls)
+            .map_err(|e| crate::common::error::Error::Security(format!("TLS config error: {}", e)))?;
+        
+        // 認証マネージャーを作成
+        // 簡略化: デフォルト値でAuthManagerを作成
+        let key_manager = crate::security::KeyManager::new(
+            "./keys",
+            crate::security::KeyRotationConfig::default()
+        ).expect("Failed to create KeyManager");
+        let session_timeout = std::time::Duration::from_secs(3600);
+        let token_duration = std::time::Duration::from_secs(1800);
+        let auth_manager = Arc::new(AuthManager::new(key_manager, session_timeout, token_duration));
+        
+        // トンネルマネージャーを作成
+        let tunnel_manager = TunnelManager::new(tls_config, auth_manager);
+        
+        Ok(Self {
+            config,
+            tunnel_manager,
+            connection_manager: None,
+        })
     }
     
     /// Start the client
-    pub async fn start(&self) -> Result<()> {
-        // TODO: Implement client startup logic
+    #[instrument(skip(self))]
+    pub async fn start(&mut self) -> Result<()> {
+        info!("Starting Conduit client: {}", self.config.client.name);
+        
+        // 接続マネージャーを作成・開始
+        let connection_config = self.config.to_connection_config();
+        let tls_config = TlsClientConfig::new(&self.config.security.tls)
+            .map_err(|e| crate::common::error::Error::Security(format!("TLS config error: {}", e)))?;
+        let key_manager = crate::security::KeyManager::new(
+            "./keys",
+            crate::security::KeyRotationConfig::default()
+        ).expect("Failed to create KeyManager");
+        let session_timeout = std::time::Duration::from_secs(3600);
+        let token_duration = std::time::Duration::from_secs(1800);
+        let auth_manager = Arc::new(AuthManager::new(key_manager, session_timeout, token_duration));
+        
+        let mut connection_manager = ConnectionManager::new(
+            connection_config,
+            tls_config,
+            auth_manager,
+        );
+        
+        // イベント処理チャンネル
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        connection_manager.set_event_channel(event_tx);
+        
+        // 接続マネージャーを開始
+        connection_manager.start().await?;
+        
+        // トンネルマネージャーに接続マネージャーを設定
+        self.tunnel_manager.set_connection_manager(connection_manager).await;
+        
+        // 設定されたトンネルを開始
+        for tunnel_config in &self.config.tunnels {
+            if tunnel_config.enabled {
+                if let Err(e) = self.start_tunnel(tunnel_config).await {
+                    error!("Failed to start tunnel {}: {}", tunnel_config.name, e);
+                }
+            }
+        }
+        
+        // イベント処理ループ
+        tokio::spawn(async move {
+            while let Some(event) = event_rx.recv().await {
+                match event {
+                    ConnectionEvent::Connected => {
+                        info!("Connected to router");
+                    }
+                    ConnectionEvent::Disconnected => {
+                        info!("Disconnected from router");
+                    }
+                    ConnectionEvent::Reconnecting => {
+                        info!("Reconnecting to router");
+                    }
+                    ConnectionEvent::Authenticated => {
+                        info!("Authenticated with router");
+                    }
+                    ConnectionEvent::Error(err) => {
+                        error!("Connection error: {}", err);
+                    }
+                    ConnectionEvent::HeartbeatSent => {
+                        info!("Heartbeat sent");
+                    }
+                    ConnectionEvent::HeartbeatReceived => {
+                        info!("Heartbeat received");
+                    }
+                }
+            }
+        });
+        
+        info!("Client started successfully");
+        Ok(())
+    }
+    
+    /// Start a specific tunnel
+    async fn start_tunnel(&self, tunnel_config: &TunnelConfig) -> Result<()> {
+        let protocol = match tunnel_config.protocol.as_str() {
+            "tcp" => crate::common::types::Protocol::Tcp,
+            "udp" => crate::common::types::Protocol::Udp,
+            _ => return Err(crate::common::error::Error::Config(
+                format!("Unsupported protocol: {}", tunnel_config.protocol)
+            )),
+        };
+        
+        let router_addr = format!("{}:{}", self.config.router.host, self.config.router.port)
+            .parse()
+            .map_err(|e| crate::common::error::Error::Config(
+                format!("Invalid router address: {}", e)
+            ))?;
+        
+        self.tunnel_manager.create_tunnel(
+            tunnel_config.name.clone(),
+            tunnel_config.source,
+            tunnel_config.bind,
+            router_addr,
+            protocol,
+        ).await?;
+        
+        info!("Tunnel started: {}", tunnel_config.name);
         Ok(())
     }
     
     /// Stop the client
-    pub async fn stop(&self) -> Result<()> {
-        // TODO: Implement client shutdown logic
+    #[instrument(skip(self))]
+    pub async fn stop(&mut self) -> Result<()> {
+        info!("Stopping Conduit client");
+        
+        // すべてのトンネルを停止
+        let tunnels = self.tunnel_manager.list_tunnels();
+        for tunnel in tunnels {
+            if let Err(e) = self.tunnel_manager.remove_tunnel(&tunnel.id).await {
+                error!("Failed to stop tunnel {}: {}", tunnel.name, e);
+            }
+        }
+        
+        // 接続マネージャーを停止
+        if let Some(ref connection_manager) = self.connection_manager {
+            connection_manager.stop().await?;
+        }
+        
+        info!("Client stopped successfully");
         Ok(())
+    }
+    
+    /// Get client statistics
+    pub fn get_stats(&self) -> ClientStats {
+        let tunnels = self.tunnel_manager.list_tunnels();
+        let running_tunnels = self.tunnel_manager.get_running_tunnels();
+        
+        ClientStats {
+            total_tunnels: tunnels.len() as u32,
+            running_tunnels: running_tunnels.len() as u32,
+            total_connections: tunnels.iter().map(|t| t.active_connections).sum(),
+            total_bytes_transferred: tunnels.iter().map(|t| t.bytes_transferred).sum(),
+        }
+    }
+    
+    /// List all tunnels
+    pub fn list_tunnels(&self) -> Vec<crate::common::types::TunnelInfo> {
+        self.tunnel_manager.list_tunnels()
+    }
+    
+    /// Get connection state
+    pub async fn connection_state(&self) -> Option<crate::protocol::ConnectionState> {
+        if let Some(ref connection_manager) = self.connection_manager {
+            Some(connection_manager.connection_state().await)
+        } else {
+            None
+        }
+    }
+}
+
+/// Client statistics
+#[derive(Debug, Clone)]
+pub struct ClientStats {
+    pub total_tunnels: u32,
+    pub running_tunnels: u32,
+    pub total_connections: u32,
+    pub total_bytes_transferred: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_client_creation() {
+        let config = ClientConfig::default();
+        let client = Client::new(config);
+        assert!(client.is_ok());
+    }
+
+    #[test]
+    fn test_client_stats() {
+        let config = ClientConfig::default();
+        let client = Client::new(config).unwrap();
+        let stats = client.get_stats();
+        assert_eq!(stats.total_tunnels, 0);
+        assert_eq!(stats.running_tunnels, 0);
     }
 }
