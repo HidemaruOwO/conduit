@@ -46,6 +46,10 @@ pub enum Error {
     #[error("TOML error: {0}")]
     Toml(#[from] toml::de::Error),
 
+    /// Protocol errors
+    #[error("Protocol error: {0}")]
+    Protocol(String),
+
     /// Generic errors
     #[error("Error: {0}")]
     Generic(String),
@@ -80,6 +84,11 @@ impl Error {
     /// Create a new tunnel error
     pub fn tunnel(msg: impl Into<String>) -> Self {
         Error::Tunnel(msg.into())
+    }
+
+    /// Create a new protocol error
+    pub fn protocol(msg: impl Into<String>) -> Self {
+        Error::Protocol(msg.into())
     }
 
     /// Create a new generic error
