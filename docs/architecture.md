@@ -61,7 +61,7 @@ ConduitはRust製のネットワークトンネリングソフトウェアです
 
 **デーモンレス設計**: ConduitはPodmanライクなデーモンレスアーキテクチャを採用し、中央管理デーモンを持たず、独立したトンネルプロセスによる分散管理を実現します。
 
-### システム構成
+### システム構成（改良版）
 
 ```
 外部ネットワークユーザー (例: Browser)
@@ -70,21 +70,35 @@ ConduitはRust製のネットワークトンネリングソフトウェアです
     ▼
 ┌─────────────────────────────────┐      ┌─────────────────────────────┐
 │        Client Side              │      │        Router Side          │
+│     (Podmanパターン)            │      │                             │
 │                                 │      │                             │
 │  ┌─────────────┐  ┌─────────────┐│      │ ┌─────────────────────────┐ │
-│  │ CLI         │  │ Process     ││      │ │       Router            │ │
-│  │ Commands    │  │ Registry    ││      │ │   :9999 (待受)          │ │
-│  └─────────────┘  └─────────────┘│      │ │                         │ │
-│         │                │       │      │ └─────────────────────────┘ │
-│         │ gRPC           │ File  │      │             │               │
-│         ▼                ▼       │      │             ▼               │
-│  ┌─────────────────────────────┐ │ TLS  │ ┌─────────────────────────┐ │
-│  │    Tunnel Process          │ │◄────►│ │    Target Service       │ │
-│  │  :80 (bind待受)            │ │      │ │  :8080 (source)         │ │
-│  │  :50001 (gRPC)             │ │      │ └─────────────────────────┘ │
-│  └─────────────────────────────┘ │      │                             │
-└─────────────────────────────────┘      └─────────────────────────────┘
+│  │ CLI         │  │SQLite       ││      │ │       Router            │ │
+│  │ Commands    │  │Registry     ││      │ │   :9999 (待受)          │ │
+│  └─────────────┘  │(WAL mode)   ││      │ │                         │ │
+│         │          └─────────────┘│      │ └─────────────────────────┘ │
+│         │ UDS               │ SQL │      │             │               │
+│         ▼                   ▼     │      │             ▼               │
+│  ┌─────────────────────────────┐  │ TLS  │ ┌─────────────────────────┐ │
+│  │ Lightweight Tunnel Process │  │◄────►│ │    Target Service       │ │
+│  │  :80 (bind待受)            │  │      │ │  :8080 (source)         │ │
+│  │  ~/.conduit/sockets/t1.sock│  │      │ └─────────────────────────┘ │
+│  │  (conmonパターン ~8MB)      │  │      │                             │
+│  └─────────────────────────────┘  │      │                             │
+│                                   │      │                             │
+│  ┌─────────────────────────────┐  │      │                             │
+│  │ Additional Tunnel Processes │  │      │                             │
+│  │  ~/.conduit/sockets/t2.sock │  │      │                             │
+│  │  ~/.conduit/sockets/tN.sock │  │      │                             │
+│  └─────────────────────────────┘  │      │                             │
+└─────────────────────────────────┐ └──────────────────────────────────┘
 ```
+
+**主要改良点**:
+- **SQLite Registry**: ファイルベースからSQLite+WALに変更、高性能並行アクセス
+- **Unix Domain Socket**: TCP gRPCからUDS gRPCに変更、セキュリティ強化
+- **軽量プロセス**: Podman conmonパターンでメモリ使用量を~8MBに削減
+- **並列CLI**: `conduit list`等で100並列+50msタイムアウト、O(n)→O(log n)改善
 
 ### 主要コンポーネント
 
@@ -162,22 +176,73 @@ message TunnelInfo {
 }
 ```
 
-### Process Registry形式
+### Process Registry形式（SQLite改良版）
+
+#### データベーススキーマ
+```sql
+-- Podmanのbolt_state.dbパターンを参考にしたSQLite設計
+CREATE TABLE tunnels (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    pid INTEGER NOT NULL,
+    socket_path TEXT NOT NULL,        -- Unix Domain Socket path
+    status INTEGER NOT NULL,          -- Podmanと同じ数値状態管理
+    config_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    exit_code INTEGER DEFAULT NULL
+);
+
+-- 高性能クエリ用インデックス
+CREATE INDEX idx_status ON tunnels(status);
+CREATE INDEX idx_created_at ON tunnels(created_at);
+```
+
+#### ファイルシステムレイアウト
+```
+~/.conduit/
+├── registry.db                 # SQLite database (WAL mode)
+├── registry.db-wal            # Write-Ahead Log
+├── registry.db-shm            # Shared memory
+├── sockets/                   # Unix Domain Sockets
+│   ├── web-server-access.sock
+│   ├── api-server-access.sock
+│   └── tunnel-N.sock
+└── tunnels/                   # Podman conmonライクなプロセス情報
+    ├── web-server-access-1234/
+    │   ├── exit               # 終了コードファイル
+    │   ├── attach             # アタッチ用情報
+    │   └── logs/              # トンネル固有ログ
+    └── api-server-access-5678/
+        ├── exit
+        ├── attach
+        └── logs/
+```
+
+#### データベースレコード例
 ```json
+-- tunnels テーブルのレコード例
 {
-  "tunnel_id": "web-server-access-1234",
+  "id": "web-server-access-1234",
   "name": "web-server-access",
   "pid": 12345,
-  "grpc_port": 50001,
-  "config": {
-    "router": "10.2.0.1:9999",
-    "source": "10.2.0.2:8080",
-    "bind": "0.0.0.0:80"
-  },
-  "status": "running",
-  "created_at": "2025-06-15T03:35:00Z"
+  "socket_path": "/home/user/.conduit/sockets/web-server-access.sock",
+  "status": 3,                 -- Running(3), Stopped(5), Stopping(4)
+  "config_json": "{\"router\":\"10.2.0.1:9999\",\"source\":\"10.2.0.2:8080\",\"bind\":\"0.0.0.0:80\"}",
+  "created_at": 1705123456,
+  "updated_at": 1705123456,
+  "exit_code": null
 }
 ```
+
+#### 状態管理（Podmanパターン）
+| 状態名 | 数値 | 説明 |
+|--------|------|------|
+| Created | 1 | 作成済み、未開始 |
+| Running | 3 | 実行中 |
+| Stopping | 4 | 停止処理中 |
+| Exited | 5 | 正常終了 |
+| Error | 6 | エラー終了 |
 
 ### サービスファイル生成機能
 
@@ -319,17 +384,57 @@ bind = "0.0.0.0:8080"
 - **設定/CLI**: serde, toml, clap
 - **監視**: prometheus, tracing
 
-### デーモンレスアーキテクチャ実装
+### デーモンレスアーキテクチャ実装（改良版）
 
-#### 1. Tunnel Process (`src/tunnel/`)
+**設計原則**: PodmanのConmonアーキテクチャパターンを採用し、OpenAI o3技術審査の指摘事項（プロセス爆発、セキュリティリスク、Registry性能）を解決する改良型デーモンレス設計を実装します。
+
+#### 1. 軽量Tunnel Process (`src/tunnel/`) - Conmonパターン
 ```rust
-// トンネルプロセスのメイン構造
-pub struct TunnelProcess {
+// Podman conmonライクな軽量トンネルプロセス（メモリ使用量: ~8MB）
+pub struct LightweightTunnelProcess {
+    // 最小限の状態のみ保持
     id: String,
     config: TunnelConfig,
+    
+    // Conmonパターンの軽量設計
+    status: AtomicTunnelStatus,
+    exit_file: PathBuf,      // ~/.conduit/tunnels/<id>/exit
+    socket_path: PathBuf,    // ~/.conduit/sockets/<id>.sock
+    
+    // Unix Domain Socket gRPCサーバー
     grpc_server: TunnelControlServer,
     tunnel_manager: TunnelManager,
-    registry: ProcessRegistry,
+}
+
+impl LightweightTunnelProcess {
+    // Podman conmon相当の軽量起動
+    pub async fn spawn_lightweight(config: TunnelConfig) -> Result<Self> {
+        // 最小限のリソースで起動、メモリ使用量を8MB以下に制限
+        let socket_path = conduit_socket_dir()?.join(format!("{}.sock", config.id));
+        
+        Ok(Self {
+            id: config.id.clone(),
+            config,
+            status: AtomicTunnelStatus::new(TunnelStatus::Starting),
+            exit_file: conduit_tunnel_dir()?.join(&config.id).join("exit"),
+            socket_path,
+            grpc_server: TunnelControlServer::new_uds(&socket_path)?,
+            tunnel_manager: TunnelManager::new().await?,
+        })
+    }
+    
+    // Podmanのプロセス監視パターン
+    pub async fn monitor_and_run(&mut self) -> Result<()> {
+        // Router接続とバインドリスナーの監視のみ
+        tokio::select! {
+            _ = self.grpc_server.serve() => {},
+            result = self.tunnel_manager.run() => {
+                // 終了時はexit fileに終了コードを書き込み
+                self.write_exit_code(result).await?;
+            }
+        }
+        Ok(())
+    }
 }
 
 pub struct TunnelManager {
@@ -340,28 +445,112 @@ pub struct TunnelManager {
 }
 ```
 
-#### 2. Process Registry (`src/registry/`)
+#### 2. SQLite Registry (`src/registry/`) - Podman bolt_state.dbパターン
 ```rust
-// ファイルベースのプロセス情報管理
-pub struct ProcessRegistry {
-    registry_dir: PathBuf, // ~/.conduit/tunnels/
+// Podmanのデータベース管理パターンを採用
+pub struct SqliteRegistry {
+    db: rusqlite::Connection,
+}
+
+impl SqliteRegistry {
+    pub fn new() -> Result<Self> {
+        let db_path = conduit_home()?.join("registry.db");
+        let conn = Connection::open(db_path)?;
+        
+        // Podmanと同じWAL mode設定
+        conn.execute("PRAGMA journal_mode=WAL", [])?;
+        conn.execute("PRAGMA synchronous=NORMAL", [])?;
+        conn.execute("PRAGMA cache_size=10000", [])?;
+        
+        // Podmanライクなスキーマ設計
+        conn.execute("
+            CREATE TABLE IF NOT EXISTS tunnels (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                pid INTEGER NOT NULL,
+                socket_path TEXT NOT NULL,
+                status INTEGER NOT NULL,  -- Podmanと同じ数値状態管理
+                config_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                exit_code INTEGER DEFAULT NULL
+            )
+        ", [])?;
+        
+        // 高性能クエリ用インデックス
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON tunnels(status)", [])?;
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON tunnels(created_at)", [])?;
+        
+        Ok(Self { db: conn })
+    }
+    
+    // Podman ps相当の高性能並列取得
+    pub fn list_active_tunnels(&self) -> Result<Vec<TunnelInfo>> {
+        let mut stmt = self.db.prepare("
+            SELECT id, name, pid, socket_path, status, config_json, created_at
+            FROM tunnels
+            WHERE status IN (3, 4)  -- Running(3), Stopping(4)
+            ORDER BY created_at DESC
+        ")?;
+        
+        let tunnels: Vec<_> = stmt.query_map([], |row| {
+            Ok(TunnelInfo {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                pid: row.get(2)?,
+                socket_path: PathBuf::from(row.get::<_, String>(3)?),
+                status: row.get(4)?,
+                config: serde_json::from_str(&row.get::<_, String>(5)?)?,
+                created_at: row.get(6)?,
+            })
+        })?.collect::<Result<Vec<_>, _>>()?;
+        
+        Ok(tunnels)
+    }
+    
+    // 原子的な状態更新（競合状態解決）
+    pub fn update_tunnel_status(&mut self, id: &str, status: TunnelStatus, exit_code: Option<i32>) -> Result<()> {
+        self.db.execute("
+            UPDATE tunnels
+            SET status = ?1, exit_code = ?2, updated_at = ?3
+            WHERE id = ?4
+        ", params![status as i32, exit_code, chrono::Utc::now().timestamp(), id])?;
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct ProcessInfo {
-    tunnel_id: String,
-    name: String,
-    pid: u32,
-    grpc_port: u16,
-    config: TunnelConfig,
-    status: ProcessStatus,
-    created_at: DateTime<Utc>,
+pub struct TunnelInfo {
+    pub id: String,
+    pub name: String,
+    pub pid: u32,
+    pub socket_path: PathBuf,
+    pub status: i32,
+    pub config: TunnelConfig,
+    pub created_at: i64,
 }
 ```
 
-#### 3. gRPC Control Service (`src/grpc/`)
+#### 3. Unix Domain Socket gRPC (`src/grpc/`) - セキュリティ強化
 ```rust
-// CLI ↔ Tunnel Process間のgRPC通信
+// PodmanのUDSパターンでセキュリティリスクを解決
+use tonic::transport::{Endpoint, Uri, Channel};
+use tower::service_fn;
+
+pub async fn create_uds_channel(socket_path: &Path) -> Result<Channel> {
+    let socket_path = socket_path.to_owned();
+    let channel = Endpoint::try_from("http://[::]:50051")?
+        .connect_with_connector(service_fn(move |_: Uri| {
+            let socket_path = socket_path.clone();
+            async move {
+                Ok::<_, std::io::Error>(tokio::net::UnixStream::connect(socket_path).await?)
+            }
+        }))
+        .await?;
+    
+    Ok(channel)
+}
+
 #[tonic::async_trait]
 impl TunnelControl for TunnelControlService {
     async fn get_status(&self, request: Request<StatusRequest>)
@@ -372,23 +561,122 @@ impl TunnelControl for TunnelControlService {
     
     async fn shutdown(&self, request: Request<ShutdownRequest>)
         -> Result<Response<ShutdownResponse>, Status>;
+        
+    // OpenAI o3推奨: streaming RPC for metrics
+    async fn get_metrics_stream(&self, request: Request<MetricsRequest>)
+        -> Result<Response<Self::GetMetricsStreamStream>, Status>;
+}
+
+pub struct TunnelControlServer {
+    socket_path: PathBuf,
+}
+
+impl TunnelControlServer {
+    pub fn new_uds(socket_path: &Path) -> Result<Self> {
+        // ソケットファイルの権限を600に設定（所有者のみアクセス可能）
+        std::fs::create_dir_all(socket_path.parent().unwrap())?;
+        Ok(Self { socket_path: socket_path.to_path_buf() })
+    }
+    
+    pub async fn serve(&self) -> Result<()> {
+        let listener = tokio::net::UnixListener::bind(&self.socket_path)?;
+        
+        // ソケットファイルの権限設定
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o600);
+            std::fs::set_permissions(&self.socket_path, perms)?;
+        }
+        
+        let incoming = tokio_stream::wrappers::UnixListenerStream::new(listener);
+        Server::builder()
+            .add_service(TunnelControlServer::new(self.clone()))
+            .serve_with_incoming(incoming)
+            .await?;
+        
+        Ok(())
+    }
 }
 ```
 
-#### 4. CLI Commands (`src/cli/commands/`)
+#### 4. 高性能CLI Commands (`src/cli/commands/`) - 並列化対応
 ```rust
-// gRPCクライアントを使用したコマンド実装
+// OpenAI o3推奨の並列化とタイムアウト処理
+use tokio::time::{timeout, Duration};
+use futures::stream::{self, StreamExt};
+
 pub async fn execute_list(args: ListArgs) -> CommandResult {
-    let registry = ProcessRegistry::new()?;
-    let processes = registry.list_active_processes()?;
+    let registry = SqliteRegistry::new()?;
+    let active_tunnels = registry.list_active_tunnels()?;
     
-    for process in processes {
-        let client = TunnelControlClient::connect(
-            format!("http://127.0.0.1:{}", process.grpc_port)
-        ).await?;
-        
-        let status = client.get_status(StatusRequest {}).await?;
-        // 結果表示処理
+    if active_tunnels.is_empty() {
+        println!("No active tunnels found.");
+        return Ok(());
+    }
+    
+    // OpenAI o3推奨: 100並列 + 50msタイムアウト
+    let results = stream::iter(active_tunnels)
+        .map(|tunnel| async move {
+            // タイムアウト付き並列gRPC呼び出し
+            timeout(Duration::from_millis(50), async {
+                let channel = create_uds_channel(&tunnel.socket_path).await?;
+                let mut client = TunnelControlClient::new(channel);
+                let response = client.get_status(StatusRequest {}).await?;
+                Ok::<_, anyhow::Error>((tunnel, response.into_inner()))
+            }).await
+        })
+        .buffer_unordered(100)  // 100並列実行
+        .collect::<Vec<_>>()
+        .await;
+    
+    // グレースフルデグラデーション: 失敗したプロセスもオフライン表示
+    for result in results {
+        match result {
+            Ok(Ok((tunnel_info, status))) => {
+                display_tunnel_status(&tunnel_info, &status);
+            },
+            Ok(Err(_)) | Err(_) => {
+                display_tunnel_offline(&tunnel_info);
+                // デッドプロセスのクリーンアップを非同期で実行
+                tokio::spawn(cleanup_dead_tunnel(tunnel_info.id));
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+// Podmanライクなプロセス死活監視
+async fn cleanup_dead_tunnel(tunnel_id: String) -> Result<()> {
+    let mut registry = SqliteRegistry::new()?;
+    
+    // PIDの存在確認（Podmanパターン）
+    if let Ok(tunnel_info) = registry.get_tunnel(&tunnel_id) {
+        if !process_exists(tunnel_info.pid) {
+            // プロセスが存在しない場合は状態をExitedに更新
+            registry.update_tunnel_status(&tunnel_id, TunnelStatus::Exited, Some(-1))?;
+            
+            // ソケットファイルのクリーンアップ
+            let _ = std::fs::remove_file(&tunnel_info.socket_path);
+        }
+    }
+    
+    Ok(())
+}
+
+fn process_exists(pid: u32) -> bool {
+    // Unix系: /proc/<pid>/stat の確認
+    #[cfg(unix)]
+    {
+        std::path::Path::new(&format!("/proc/{}", pid)).exists()
+    }
+    
+    // Windows: プロセスハンドル確認
+    #[cfg(windows)]
+    {
+        // Windows実装
+        false
     }
 }
 ```
@@ -416,6 +704,92 @@ src/
 │   └── generator.rs    # サービスファイル生成
 └── cli/commands/       # 既存のCLIコマンド実装
 ```
+
+### マルチプラットフォーム外部終了対応
+
+#### 外部終了時のDB状態管理（重要な課題解決）
+
+**問題**: `systemctl stop`、`rc-service stop`、`launchctl unload`等による外部終了時、DB状態が`Running(3)`のまま残る問題。
+
+**解決策**: 多層防御による堅牢な状態同期機構
+
+```rust
+// レベル1: シグナルハンドラー（全プラットフォーム対応）
+impl LightweightTunnelProcess {
+    pub async fn setup_signal_handlers(&self) -> Result<()> {
+        let tunnel_id = self.id.clone();
+        let exit_file = self.exit_file.clone();
+        
+        // SIGTERM/SIGINT処理
+        tokio::spawn(async move {
+            let mut sigterm = signal(SignalKind::terminate()).unwrap();
+            sigterm.recv().await;
+            
+            // 外部終了をDB/ファイルに記録
+            let exit_code = 128 + 15;  // SIGTERM
+            let _ = std::fs::write(&exit_file, exit_code.to_string());
+            
+            // SQLite状態更新
+            if let Ok(mut registry) = SqliteRegistry::new() {
+                let _ = registry.update_tunnel_status(&tunnel_id, TunnelStatus::Exited, Some(exit_code));
+            }
+            
+            info!("Tunnel {} externally terminated", tunnel_id);
+            std::process::exit(exit_code);
+        });
+        
+        Ok(())
+    }
+}
+
+// レベル2: プロセス生存確認と自動同期
+pub async fn sync_tunnel_status(registry: &mut SqliteRegistry) -> Result<()> {
+    let tunnels = registry.list_all_tunnels()?;
+    
+    for tunnel in tunnels {
+        if matches!(tunnel.status, 3 | 4) {  // Running | Stopping
+            if !process_exists(tunnel.pid) {
+                // 外部終了検出: DB状態をExitedに修正
+                let exit_code = read_exit_code(&tunnel.id).unwrap_or(-1);
+                registry.update_tunnel_status(&tunnel.id, TunnelStatus::Exited, Some(exit_code))?;
+                
+                // リソースクリーンアップ
+                let _ = std::fs::remove_file(&tunnel.socket_path);
+                warn!("Tunnel {} was externally terminated", tunnel.id);
+            }
+        }
+    }
+    Ok(())
+}
+
+// レベル3: プラットフォーム固有サービスフック
+pub trait ServiceManager {
+    fn generate_service_file(&self, config: &TunnelConfig) -> Result<String>;
+    fn supports_stop_hooks(&self) -> bool;
+}
+
+// systemd実装例
+impl ServiceManager for SystemdManager {
+    fn generate_service_file(&self, config: &TunnelConfig) -> Result<String> {
+        Ok(format!(r#"
+[Service]
+ExecStart=/usr/local/bin/conduit tunnel-process --config {}
+ExecStop=/usr/local/bin/conduit internal-stop {}
+ExecStopPost=/usr/local/bin/conduit internal-cleanup {}
+"#, config.id, config.id, config.id))
+    }
+}
+```
+
+#### プラットフォーム対応状況
+
+| プラットフォーム | サービス管理 | 停止フック | 対応レベル |
+|----------------|-------------|-----------|-----------|
+| **systemd** (Linux) | `systemctl stop` | `ExecStop`/`ExecStopPost` | 完全対応 |
+| **openrc** (Alpine) | `rc-service stop` | `stop()`/`stop_post()` | 完全対応 |
+| **launchd** (macOS) | `launchctl unload` | シグナルのみ | 基本対応 |
+| **rc.d** (FreeBSD) | `service stop` | `stop_cmd` | 完全対応 |
+| **直接終了** | `kill`/`pkill` | シグナルのみ | 基本対応 |
 
 **パフォーマンス目標**: 10,000+同時接続, 10Gbps+スループット, <10msレイテンシ
 **最適化**: ゼロコピーI/O, 接続プール, 自動チューニング
