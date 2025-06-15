@@ -1,6 +1,6 @@
-//! Conduit - High-performance network tunneling software
-//!
-//! This library provides the core functionality for the Conduit network tunneling system.
+// Conduit - 高性能ネットワークトンネリングソフトウェア
+//
+// Conduitネットワークトンネリングシステムのコア機能を提供するライブラリ
 
 pub mod cli;
 pub mod client;
@@ -14,11 +14,6 @@ pub use common::{
     error::{Error, Result},
 };
 
-/// Conduit library version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// Conduit library name
 pub const NAME: &str = env!("CARGO_PKG_NAME");
-
-/// Conduit library description
 pub const DESCRIPTION: &str = env!("CARGO_PKG_DESCRIPTION");

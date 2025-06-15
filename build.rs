@@ -1,11 +1,11 @@
-//! Build script for Conduit
-//! 
-//! This script generates build-time information using vergen
+//! Conduitのビルドスクリプト
+//!
+//! vergenを使用してビルド時情報を生成
 
 use vergen::EmitBuilder;
 
 fn main() {
-    // Generate build-time environment variables
+    // ビルド時環境変数を生成（バージョン情報用）
     if let Err(error) = EmitBuilder::builder()
         .all_build()
         .all_cargo()

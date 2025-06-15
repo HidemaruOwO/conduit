@@ -1,6 +1,6 @@
-//! CLI command implementations
-//!
-//! This module contains the implementation of all CLI commands.
+// CLIコマンド実装モジュール
+//
+// 全CLIコマンドの実装を含むモジュール
 
 pub mod init;
 pub mod start;
@@ -15,5 +15,4 @@ pub mod version;
 
 use crate::common::error::Result;
 
-/// Common result type for all command operations
 pub type CommandResult = Result<()>;

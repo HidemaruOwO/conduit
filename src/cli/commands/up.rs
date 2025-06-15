@@ -1,11 +1,10 @@
-//! Up command implementation
+// upコマンドの実装
 
 use crate::cli::UpArgs;
 use crate::cli::commands::CommandResult;
 use crate::common::{config::Config, error::Error};
 use tracing::info;
 
-/// Execute the up command
 pub async fn execute(args: UpArgs) -> CommandResult {
     info!("Starting tunnels from configuration file: {}", args.file.display());
     
@@ -21,6 +20,6 @@ pub async fn execute(args: UpArgs) -> CommandResult {
         println!("   - {}: {} -> {}", tunnel.name, tunnel.bind, tunnel.source);
     }
     
-    // TODO: Implement actual tunnel startup logic
+    // TODO: デーモンレスアーキテクチャによる複数トンネルプロセス起動実装
     Err(Error::generic("Up command not yet implemented"))
 }

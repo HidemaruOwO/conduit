@@ -1,6 +1,6 @@
-//! Init command implementation
-//! 
-//! This command initializes keys and configuration for Conduit
+// initコマンドの実装
+//
+// Conduitのキーと設定ファイルを初期化するコマンド
 
 use crate::cli::InitArgs;
 use crate::cli::commands::CommandResult;
@@ -11,19 +11,13 @@ use std::fs;
 use std::path::Path;
 use tracing::{info, warn};
 
-/// Execute the init command
 pub async fn execute(args: InitArgs) -> CommandResult {
     let work_dir = args.directory.unwrap_or_else(|| std::env::current_dir().unwrap());
     
     info!("Initializing Conduit in directory: {}", work_dir.display());
     
-    // Create necessary directories
     create_directories(&work_dir, args.force)?;
-    
-    // Generate key pair
     generate_keypair(&work_dir, args.force)?;
-    
-    // Create sample configuration file
     create_sample_config(&work_dir, args.force)?;
     
     println!("✅ Conduit initialization completed successfully!");
@@ -39,7 +33,6 @@ pub async fn execute(args: InitArgs) -> CommandResult {
     Ok(())
 }
 
-/// Create necessary directories
 fn create_directories(work_dir: &Path, force: bool) -> CommandResult {
     let keys_dir = work_dir.join("keys");
     
@@ -55,7 +48,6 @@ fn create_directories(work_dir: &Path, force: bool) -> CommandResult {
     Ok(())
 }
 
-/// Generate Ed25519 key pair
 fn generate_keypair(work_dir: &Path, force: bool) -> CommandResult {
     use ed25519_dalek::{SigningKey, VerifyingKey};
     use rand::rngs::OsRng;
@@ -63,39 +55,33 @@ fn generate_keypair(work_dir: &Path, force: bool) -> CommandResult {
     let private_key_path = work_dir.join("keys/client.key");
     let public_key_path = work_dir.join("keys/client.pub");
     
-    // Check if keys already exist
     if (private_key_path.exists() || public_key_path.exists()) && !force {
         return Err(Error::config(
             "Key files already exist. Use --force to overwrite."
         ));
     }
     
-    // Generate new key pair
     let mut csprng = OsRng {};
     let signing_key = SigningKey::generate(&mut csprng);
     let verifying_key: VerifyingKey = signing_key.verifying_key();
     
-    // Save private key
     let private_key_bytes = signing_key.to_bytes();
     let private_key_b64 = BASE64_STANDARD.encode(&private_key_bytes);
     fs::write(&private_key_path, private_key_b64)?;
     
-    // Save public key
     let public_key_bytes = verifying_key.to_bytes();
     let public_key_b64 = BASE64_STANDARD.encode(&public_key_bytes);
     fs::write(&public_key_path, public_key_b64)?;
     
-    // Set appropriate permissions (Unix only)
+    // セキュリティのためUnixでファイル権限を適切に設定
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         
-        // Private key should be readable only by owner
         let mut perms = fs::metadata(&private_key_path)?.permissions();
         perms.set_mode(0o600);
         fs::set_permissions(&private_key_path, perms)?;
         
-        // Public key can be readable by others
         let mut perms = fs::metadata(&public_key_path)?.permissions();
         perms.set_mode(0o644);
         fs::set_permissions(&public_key_path, perms)?;
@@ -108,7 +94,6 @@ fn generate_keypair(work_dir: &Path, force: bool) -> CommandResult {
     Ok(())
 }
 
-/// Create sample configuration file
 fn create_sample_config(work_dir: &Path, force: bool) -> CommandResult {
     let config_path = work_dir.join("conduit.toml");
     

@@ -1,4 +1,4 @@
-//! Tunnel implementation for client
+// Tunnel implementation for client
 
 use crate::common::{error::Result, types::*};
 use crate::protocol::{ProtocolHandler, Message, MessageType, MessagePayload, TunnelCreate};

@@ -1,6 +1,6 @@
-//! Client接続管理
-//!
-//! Router接続管理、自動再接続機能、接続状態監視、Heartbeat処理を提供します
+// Client接続管理
+//
+// Router接続管理、自動再接続機能、接続状態監視、Heartbeat処理を提供します
 
 use std::sync::Arc;
 use std::time::Duration;

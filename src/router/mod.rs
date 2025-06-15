@@ -1,7 +1,7 @@
-//! Router module for Conduit
-//!
-//! This module implements the router-side functionality that accepts client connections
-//! and forwards traffic to target services.
+// Router module for Conduit
+//
+// This module implements the router-side functionality that accepts client connections
+// and forwards traffic to target services.
 
 use crate::common::error::Result;
 use std::net::SocketAddr;

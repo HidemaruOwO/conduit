@@ -1,7 +1,6 @@
-//! CLI module for Conduit
-//!
-//! This module handles command-line interface functionality including
-//! argument parsing and command execution.
+// ConduitのCLIモジュール
+//
+// コマンドライン引数の解析とコマンド実行機能を提供
 
 use clap::{Parser, Subcommand};
 use std::net::SocketAddr;
@@ -9,7 +8,6 @@ use std::path::PathBuf;
 
 pub mod commands;
 
-/// Conduit CLI application
 #[derive(Parser)]
 #[command(
     name = "conduit",
@@ -22,7 +20,6 @@ pub struct CliArgs {
     pub command: Commands,
 }
 
-/// Available CLI commands
 #[derive(Subcommand)]
 pub enum Commands {
     /// Initialize keys and configuration
@@ -56,7 +53,6 @@ pub enum Commands {
     Version,
 }
 
-/// Arguments for 'init' command
 #[derive(Parser)]
 pub struct InitArgs {
     /// Directory to initialize (default: current directory)
@@ -68,7 +64,6 @@ pub struct InitArgs {
     pub force: bool,
 }
 
-/// Arguments for 'start' command
 #[derive(Parser)]
 pub struct StartArgs {
     /// Router address to connect to
@@ -88,7 +83,6 @@ pub struct StartArgs {
     pub key: Option<PathBuf>,
 }
 
-/// Arguments for 'up' command
 #[derive(Parser)]
 pub struct UpArgs {
     /// Configuration file path
@@ -100,7 +94,6 @@ pub struct UpArgs {
     pub daemon: bool,
 }
 
-/// Arguments for 'down' command
 #[derive(Parser)]
 pub struct DownArgs {
     /// Configuration file path
@@ -108,7 +101,6 @@ pub struct DownArgs {
     pub file: PathBuf,
 }
 
-/// Arguments for 'router' command
 #[derive(Parser)]
 pub struct RouterArgs {
     /// Address to bind the router server
@@ -124,7 +116,6 @@ pub struct RouterArgs {
     pub daemon: bool,
 }
 
-/// Arguments for 'list' command
 #[derive(Parser)]
 pub struct ListArgs {
     /// Show only tunnels
@@ -140,7 +131,6 @@ pub struct ListArgs {
     pub format: String,
 }
 
-/// Arguments for 'kill' command
 #[derive(Parser)]
 pub struct KillArgs {
     /// Kill all tunnels and connections
@@ -156,7 +146,6 @@ pub struct KillArgs {
     pub connection: Option<String>,
 }
 
-/// Arguments for 'status' command
 #[derive(Parser)]
 pub struct StatusArgs {
     /// Output format (table, json, yaml)
@@ -168,14 +157,12 @@ pub struct StatusArgs {
     pub detailed: bool,
 }
 
-/// Arguments for 'config' command
 #[derive(Parser)]
 pub struct ConfigArgs {
     #[command(subcommand)]
     pub action: ConfigAction,
 }
 
-/// Configuration management actions
 #[derive(Subcommand)]
 pub enum ConfigAction {
     /// Show current configuration

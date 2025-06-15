@@ -1,8 +1,8 @@
-//! Version command implementation
+// versionコマンドの実装
 
 use crate::cli::commands::CommandResult;
 
-/// Execute the version command
+// バージョン情報を表示するコマンドを実行
 pub async fn execute() -> CommandResult {
     println!("conduit {}", env!("CARGO_PKG_VERSION"));
     println!("Build date: {}", env!("VERGEN_BUILD_DATE"));
