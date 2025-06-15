@@ -59,52 +59,144 @@ ConduitはRust製のネットワークトンネリングソフトウェアです
 
 ## アーキテクチャ設計
 
-**システム構成**:
+**デーモンレス設計**: ConduitはPodmanライクなデーモンレスアーキテクチャを採用し、中央管理デーモンを持たず、独立したトンネルプロセスによる分散管理を実現します。
+
+### システム構成
 
 ```
 外部ネットワークユーザー (例: Browser)
     │
-    │ (Client の bind ポート経由でアクセス)
+    │ (Tunnel Process の bind ポート経由でアクセス)
     ▼
-┌─────────────────┐      ┌─────────────────────────────┐
-│ Conduit Client  │ ←TLS→│         Router              │
-│(外部公開側)     │      │(Routerと同一サブネット内)   │
-│ :80 (bind待受)  │      │ :9999 (Router待受)          │
-└─────────────────┘      │ :8080 (source転送先サービス)│
-                         └─────────────────────────────┘
+┌─────────────────────────────────┐      ┌─────────────────────────────┐
+│        Client Side              │      │        Router Side          │
+│                                 │      │                             │
+│  ┌─────────────┐  ┌─────────────┐│      │ ┌─────────────────────────┐ │
+│  │ CLI         │  │ Process     ││      │ │       Router            │ │
+│  │ Commands    │  │ Registry    ││      │ │   :9999 (待受)          │ │
+│  └─────────────┘  └─────────────┘│      │ │                         │ │
+│         │                │       │      │ └─────────────────────────┘ │
+│         │ gRPC           │ File  │      │             │               │
+│         ▼                ▼       │      │             ▼               │
+│  ┌─────────────────────────────┐ │ TLS  │ ┌─────────────────────────┐ │
+│  │    Tunnel Process          │ │◄────►│ │    Target Service       │ │
+│  │  :80 (bind待受)            │ │      │ │  :8080 (source)         │ │
+│  │  :50001 (gRPC)             │ │      │ └─────────────────────────┘ │
+│  └─────────────────────────────┘ │      │                             │
+└─────────────────────────────────┘      └─────────────────────────────┘
 ```
 
-- **Conduit Client**:
-  - 外部ユーザーからのアクセスを受け付けるエントリーポイント。
-  - `--bind` で指定したアドレス・ポート (例: `0.0.0.0:80`) で外部からの接続を待ち受け。
-  - 受信したリクエストをTLS暗号化してRouterに転送。
-  - Routerとの通信はTLS 1.3 + Ed25519で暗号化。
-- **Router**:
-  - プライベートネットワーク内の中継サーバー。
-  - Clientからのトンネル確立要求を受け付け、認証・ルーティングを行う。
-  - Client経由で受信したリクエストを、同一サブネット内のサービス(`--source`で指定)に転送。
+### 主要コンポーネント
 
-**データフロー**:
+#### 1. CLI Commands
+- **役割**: ユーザーインターフェースとして動作
+- **通信**: gRPC経由でTunnel Processと通信
+- **コマンド**: [`conduit start`](src/cli/commands/start.rs), [`conduit up`](src/cli/commands/up.rs), [`conduit list`](src/cli/commands/list.rs), [`conduit kill`](src/cli/commands/kill.rs), [`conduit status`](src/cli/commands/status.rs)
 
-1. **トンネル確立 (Client → Router)**:
-   a. ClientがRouterにTLS接続。
-   b. Ed25519署名でClientを認証。
-   c. Clientがトンネル要求:
-   - 転送先サービスのアドレス・ポート (`--source` で指定、例: `10.2.0.2:8080` - Router同一サブネット内のサービス)
-   - Clientが外部接続を待ち受けるアドレス・ポート (`--bind` で指定、例: `0.0.0.0:80`)
-     d. Routerは要求を検証し、トンネル情報を登録。Clientに成功応答。
-2. **データ転送 (外部ユーザー → Router側サービス)**:
-   a. 外部ユーザーがClient(`--bind`ポート)にアクセス。
-   b. Clientは受信データをTLS暗号化してRouterに転送。
-   c. RouterはTLSを復号し、`--source`で指定されたサービス(例: `10.2.0.2:8080`)に転送。
-   d. サービスからの応答は逆ルートで外部ユーザーに返される: サービス → Router → Client(TLS) → 外部ユーザー。
+#### 2. Tunnel Process
+- **役割**: 独立したプロセスとしてトンネルを管理・実行
+- **機能**:
+  - 外部ユーザーからのアクセスを受け付け（`--bind`ポート）
+  - TLS暗号化によるRouterとの安全な通信
+  - gRPCサーバーとしてCLIコマンドからの制御要求を受け付け
+- **ライフサイクル**: `conduit start`/`conduit up`で起動、明示的な終了まで動作継続
 
-**コンポーネント**:
+#### 3. Process Registry
+- **役割**: 実行中のTunnel Processの情報を管理
+- **実装**: ファイルベースのレジストリ（`~/.conduit/tunnels/`）
+- **情報**: プロセスID、gRPCアドレス、トンネル設定、状態情報
 
-- **Client (`conduit start` / `conduit up`)**: `TunnelManager`, `TlsConnector` ([`src/client.rs`](src/client.rs), [`src/tls.rs`](src/tls.rs))
-  - 外部アクセス受付、Routerへの接続、リクエスト転送処理。
-- **Router (`conduit router`)**: `ClientManager`, `TunnelRegistry` ([`src/router.rs`](src/router.rs), [`src/registry.rs`](src/registry.rs))
-  - Client接続管理、認証、Router側サービスへのルーティング。
+#### 4. Router
+- **役割**: プライベートネットワーク内の中継サーバー
+- **機能**: Tunnel Processからの要求を受け付け、認証・ルーティングを実行
+
+### データフロー
+
+#### 1. トンネル確立フロー
+```
+conduit start --router 10.2.0.1:9999 --source 10.2.0.2:8080 --bind 0.0.0.0:80
+    ↓
+1. Tunnel Processをバックグラウンドで起動
+2. Process RegistryにTunnel Process情報を登録
+3. Tunnel ProcessがgRPCサーバーを起動 (例: :50001)
+4. Tunnel ProcessがRouterにTLS接続・認証
+5. トンネル確立成功、外部アクセス待機開始
+```
+
+#### 2. データ転送フロー
+```
+外部ユーザー → Tunnel Process(:80) → Router → Target Service(:8080)
+                    ↑ TLS暗号化 ↑
+```
+
+#### 3. 制御コマンドフロー
+```
+conduit list
+    ↓
+1. Process Registryから実行中のTunnel Processを検索
+2. 各Tunnel ProcessのgRPCエンドポイントに接続
+3. GetStatus RPCでトンネル情報を取得
+4. 結果をユーザーに表示
+```
+
+### gRPC API設計
+
+#### TunnelControl Service
+```protobuf
+service TunnelControl {
+  rpc GetStatus(StatusRequest) returns (StatusResponse);
+  rpc ListConnections(ListRequest) returns (ListResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+  rpc GetMetrics(MetricsRequest) returns (MetricsResponse);
+}
+
+message TunnelInfo {
+  string id = 1;
+  string name = 2;
+  string router_addr = 3;
+  string source_addr = 4;
+  string bind_addr = 5;
+  string status = 6;
+  int64 created_at = 7;
+  int32 active_connections = 8;
+}
+```
+
+### Process Registry形式
+```json
+{
+  "tunnel_id": "web-server-access-1234",
+  "name": "web-server-access",
+  "pid": 12345,
+  "grpc_port": 50001,
+  "config": {
+    "router": "10.2.0.1:9999",
+    "source": "10.2.0.2:8080",
+    "bind": "0.0.0.0:80"
+  },
+  "status": "running",
+  "created_at": "2025-06-15T03:35:00Z"
+}
+```
+
+### サービスファイル生成機能
+
+#### コマンド仕様
+```bash
+# systemdサービスファイル生成
+conduit start --service-file systemd --router 10.2.0.1:9999 --source 10.2.0.2:8080 --bind 0.0.0.0:80
+
+# 複数プラットフォーム対応
+conduit up --service-file launchd -f conduit.toml
+conduit up --service-file openrc -f conduit.toml
+conduit up --service-file rc.d -f conduit.toml
+```
+
+#### 対応プラットフォーム
+- **systemd** (Linux)
+- **openrc** (Alpine Linux)
+- **launchd** (macOS)
+- **rc.d** (FreeBSD)
 
 ---
 
@@ -164,6 +256,10 @@ conduit config show
 conduit up -f conduit-dev.toml     # 開発環境
 conduit up -f conduit-prod.toml    # 本番環境
 conduit up -f conduit-staging.toml # ステージング環境
+
+# サービスファイル生成
+conduit start --service-file systemd --router 10.2.0.1:9999 --source 10.2.0.2:8080 --bind 0.0.0.0:80
+conduit up --service-file launchd -f conduit.toml
 ```
 
 ---
@@ -218,35 +314,107 @@ bind = "0.0.0.0:8080"
 
 **技術スタック**:
 
-- Rust + Tokio (非同期), rustls (TLS), ed25519-dalek
-- serde, toml, clap (設定/CLI), prometheus, tracing (監視)
+- **基盤**: Rust + Tokio (非同期), rustls (TLS), ed25519-dalek
+- **gRPC**: tonic, prost (プロトコルバッファ)
+- **設定/CLI**: serde, toml, clap
+- **監視**: prometheus, tracing
 
-**アーキテクチャ**:
+### デーモンレスアーキテクチャ実装
 
-- `TunnelManager`: トンネル接続管理、アクティブ接続追跡、メトリクス収集
-- `TunnelRegistry`: トンネル状態の永続化とプロセス間通信 (Unix socket)
-- プロトコル処理: ハンドシェイク、認証、データ転送、Ping/Pong
-- 管理インターフェース: `list/kill`コマンド用のコントロールサーバー（Unix socket）
-
-**実装詳細**:
-
+#### 1. Tunnel Process (`src/tunnel/`)
 ```rust
-// トンネル管理
-struct TunnelManager {
-    tunnels: HashMap<String, TunnelInfo>,
-    connections: HashMap<String, ConnectionInfo>,
-    control_socket: Option<UnixListener>,
+// トンネルプロセスのメイン構造
+pub struct TunnelProcess {
+    id: String,
+    config: TunnelConfig,
+    grpc_server: TunnelControlServer,
+    tunnel_manager: TunnelManager,
+    registry: ProcessRegistry,
 }
 
-struct TunnelInfo {
-    id: String,
-    name: String,
-    source: SocketAddr,
-    bind: SocketAddr,
-    router: SocketAddr,
-    status: TunnelStatus,
-    active_connections: u32,
+pub struct TunnelManager {
+    router_connection: RouterConnection,
+    bind_listener: TcpListener,
+    active_connections: HashMap<String, ConnectionInfo>,
+    metrics: TunnelMetrics,
 }
+```
+
+#### 2. Process Registry (`src/registry/`)
+```rust
+// ファイルベースのプロセス情報管理
+pub struct ProcessRegistry {
+    registry_dir: PathBuf, // ~/.conduit/tunnels/
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ProcessInfo {
+    tunnel_id: String,
+    name: String,
+    pid: u32,
+    grpc_port: u16,
+    config: TunnelConfig,
+    status: ProcessStatus,
+    created_at: DateTime<Utc>,
+}
+```
+
+#### 3. gRPC Control Service (`src/grpc/`)
+```rust
+// CLI ↔ Tunnel Process間のgRPC通信
+#[tonic::async_trait]
+impl TunnelControl for TunnelControlService {
+    async fn get_status(&self, request: Request<StatusRequest>)
+        -> Result<Response<StatusResponse>, Status>;
+    
+    async fn list_connections(&self, request: Request<ListRequest>)
+        -> Result<Response<ListResponse>, Status>;
+    
+    async fn shutdown(&self, request: Request<ShutdownRequest>)
+        -> Result<Response<ShutdownResponse>, Status>;
+}
+```
+
+#### 4. CLI Commands (`src/cli/commands/`)
+```rust
+// gRPCクライアントを使用したコマンド実装
+pub async fn execute_list(args: ListArgs) -> CommandResult {
+    let registry = ProcessRegistry::new()?;
+    let processes = registry.list_active_processes()?;
+    
+    for process in processes {
+        let client = TunnelControlClient::connect(
+            format!("http://127.0.0.1:{}", process.grpc_port)
+        ).await?;
+        
+        let status = client.get_status(StatusRequest {}).await?;
+        // 結果表示処理
+    }
+}
+```
+
+### ディレクトリ構造
+
+```
+src/
+├── grpc/
+│   ├── mod.rs
+│   ├── server.rs       # gRPCサーバー実装
+│   ├── client.rs       # gRPCクライアント実装
+│   └── tunnel.proto    # プロトコル定義
+├── registry/
+│   ├── mod.rs
+│   ├── manager.rs      # レジストリ管理
+│   └── process.rs      # プロセス情報
+├── tunnel/
+│   ├── mod.rs
+│   ├── process.rs      # トンネルプロセス
+│   └── manager.rs      # トンネル管理
+├── service/
+│   ├── mod.rs
+│   ├── template.rs     # サービスファイルテンプレート
+│   └── generator.rs    # サービスファイル生成
+└── cli/commands/       # 既存のCLIコマンド実装
 ```
 
 **パフォーマンス目標**: 10,000+同時接続, 10Gbps+スループット, <10msレイテンシ
@@ -1855,56 +2023,304 @@ mod tests {
 
 ```
 
-### 実装手順
+### デーモンレスアーキテクチャ実装計画
 
-### Phase 1: Core Implementation (P0) - 4週間
+### Phase 1: gRPC Infrastructure (P0) - 2週間
 
-**Week 1: 基盤実装**
+**Week 1: gRPCプロトコル定義とコード生成**
+
+```protobuf
+// src/grpc/tunnel.proto
+syntax = "proto3";
+
+package tunnel;
+
+service TunnelControl {
+  rpc GetStatus(StatusRequest) returns (StatusResponse);
+  rpc ListConnections(ListRequest) returns (ListResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+  rpc GetMetrics(MetricsRequest) returns (MetricsResponse);
+}
+
+message TunnelInfo {
+  string id = 1;
+  string name = 2;
+  string router_addr = 3;
+  string source_addr = 4;
+  string bind_addr = 5;
+  string status = 6;
+  int64 created_at = 7;
+  int32 active_connections = 8;
+}
+
+message StatusResponse {
+  TunnelInfo tunnel = 1;
+  repeated ConnectionInfo connections = 2;
+  TunnelMetrics metrics = 3;
+}
+```
 
 ```rust
-// Day 1-2: プロジェクト構造とCLI基盤
-// src/main.rs
-use clap::{Parser, Subcommand};
-
-#[derive(Parser)]
-#[command(name = "conduit")]
-#[command(about = "High-performance network tunneling software")]
-#[command(version)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    Init(crate::cli::commands::init::InitArgs),
-    Start(crate::cli::commands::start::StartArgs),
-    Router(crate::cli::commands::router::RouterArgs),
-    // ... 他のコマンド
-}
-
-// Day 3-4: 設定管理システム
-// src/config/mod.rs
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConduitConfig {
-    pub version: String,
-    pub router: RouterConfig,
-    pub security: SecurityConfig,
-    pub logging: LoggingConfig,
-    pub tunnels: Vec<TunnelConfig>,
-}
-
-impl ConduitConfig {
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let content = std::fs::read_to_string(path)?;
-        let config: Self = toml::from_str(&content)?;
-        config.validate()?;
-        Ok(config)
+// src/grpc/server.rs - gRPCサーバー実装
+#[tonic::async_trait]
+impl TunnelControl for TunnelControlService {
+    async fn get_status(&self, _: Request<StatusRequest>)
+        -> Result<Response<StatusResponse>, Status> {
+        let tunnel_info = self.tunnel_manager.get_tunnel_info().await;
+        let connections = self.tunnel_manager.list_connections().await;
+        let metrics = self.tunnel_manager.get_metrics().await;
+        
+        Ok(Response::new(StatusResponse {
+            tunnel: Some(tunnel_info),
+            connections,
+            metrics: Some(metrics),
+        }))
     }
 }
 
-// Day 5-7: エラーハンドリングとログシステム
-// src/utils/errors.rs - 前回定義したConduitError実装
+// src/grpc/client.rs - gRPCクライアント実装
+pub struct TunnelControlClient {
+    inner: TunnelControlClientInner,
+}
+
+impl TunnelControlClient {
+    pub async fn connect(addr: String) -> Result<Self, Box<dyn std::error::Error>> {
+        let inner = TunnelControlClientInner::connect(addr).await?;
+        Ok(Self { inner })
+    }
+    
+    pub async fn get_status(&mut self) -> Result<StatusResponse, Box<dyn std::error::Error>> {
+        let response = self.inner.get_status(StatusRequest {}).await?;
+        Ok(response.into_inner())
+    }
+}
+```
+
+**Week 2: Process Registry実装**
+
+```rust
+// src/registry/manager.rs
+pub struct ProcessRegistry {
+    registry_dir: PathBuf,
+}
+
+impl ProcessRegistry {
+    pub fn new() -> Result<Self, RegistryError> {
+        let home_dir = dirs::home_dir().ok_or(RegistryError::HomeDirectoryNotFound)?;
+        let registry_dir = home_dir.join(".conduit/tunnels");
+        std::fs::create_dir_all(&registry_dir)?;
+        
+        Ok(Self { registry_dir })
+    }
+    
+    pub fn register_process(&self, info: ProcessInfo) -> Result<(), RegistryError> {
+        let file_path = self.registry_dir.join(format!("{}.json", info.tunnel_id));
+        let json = serde_json::to_string_pretty(&info)?;
+        std::fs::write(file_path, json)?;
+        Ok(())
+    }
+    
+    pub fn list_active_processes(&self) -> Result<Vec<ProcessInfo>, RegistryError> {
+        let mut processes = Vec::new();
+        
+        for entry in std::fs::read_dir(&self.registry_dir)? {
+            let entry = entry?;
+            if entry.path().extension() == Some(std::ffi::OsStr::new("json")) {
+                let content = std::fs::read_to_string(entry.path())?;
+                let info: ProcessInfo = serde_json::from_str(&content)?;
+                
+                // プロセスが実際に動作しているかチェック
+                if self.is_process_alive(info.pid) {
+                    processes.push(info);
+                } else {
+                    // 死んだプロセスのファイルを削除
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+        
+        Ok(processes)
+    }
+}
+```
+
+### Phase 2: Command Implementation (P0) - 2週間
+
+**Week 3: CLI Commands修正**
+
+```rust
+// src/cli/commands/start.rs - バックグラウンドプロセス起動
+pub async fn execute(args: StartArgs) -> CommandResult {
+    let config = TunnelConfig::from_args(&args);
+    
+    // サービスファイル生成モード
+    if let Some(service_type) = args.service_file {
+        return generate_service_file(&config, &service_type);
+    }
+    
+    // 通常のトンネル起動モード
+    let registry = ProcessRegistry::new()?;
+    let grpc_port = find_available_port()?;
+    
+    // バックグラウンドでトンネルプロセスを起動
+    let child = Command::new(std::env::current_exe()?)
+        .args(&["_tunnel_process"])
+        .env("TUNNEL_CONFIG", serde_json::to_string(&config)?)
+        .env("GRPC_PORT", grpc_port.to_string())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    
+    // Process Registryに登録
+    let process_info = ProcessInfo {
+        tunnel_id: config.id.clone(),
+        name: config.name.clone(),
+        pid: child.id(),
+        grpc_port,
+        config: config.clone(),
+        status: ProcessStatus::Starting,
+        created_at: Utc::now(),
+    };
+    
+    registry.register_process(process_info)?;
+    
+    println!("🚀 Tunnel started: {} (PID: {})", config.name, child.id());
+    Ok(())
+}
+
+// src/cli/commands/list.rs - gRPC経由でプロセス情報取得
+pub async fn execute(args: ListArgs) -> CommandResult {
+    let registry = ProcessRegistry::new()?;
+    let processes = registry.list_active_processes()?;
+    
+    if processes.is_empty() {
+        println!("No active tunnels found");
+        return Ok(());
+    }
+    
+    println!("📋 Active Tunnels:");
+    for process in processes {
+        let mut client = TunnelControlClient::connect(
+            format!("http://127.0.0.1:{}", process.grpc_port)
+        ).await?;
+        
+        match client.get_status().await {
+            Ok(status) => {
+                if args.format == OutputFormat::Json {
+                    println!("{}", serde_json::to_string_pretty(&status)?);
+                } else {
+                    print_tunnel_status(&status, &args);
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to get status for {}: {}", process.name, e);
+            }
+        }
+    }
+    
+    Ok(())
+}
+```
+
+**Week 4: Service File Generation**
+
+```rust
+// src/service/generator.rs
+pub fn generate_service_file(config: &TunnelConfig, service_type: &str) -> Result<String, ServiceError> {
+    match service_type {
+        "systemd" => generate_systemd_service(config),
+        "launchd" => generate_launchd_service(config),
+        "openrc" => generate_openrc_service(config),
+        "rc.d" => generate_rcd_service(config),
+        _ => Err(ServiceError::UnsupportedServiceType(service_type.to_string())),
+    }
+}
+
+fn generate_systemd_service(config: &TunnelConfig) -> Result<String, ServiceError> {
+    let template = r#"[Unit]
+Description=Conduit Tunnel - {name}
+After=network.target
+Wants=network.target
+
+[Service]
+Type=exec
+ExecStart={binary_path} start --router {router} --source {source} --bind {bind}
+Restart=always
+RestartSec=5
+User={user}
+Group={group}
+
+[Install]
+WantedBy=multi-user.target
+"#;
+
+    let service_content = template
+        .replace("{name}", &config.name)
+        .replace("{binary_path}", &std::env::current_exe()?.to_string_lossy())
+        .replace("{router}", &config.router_addr.to_string())
+        .replace("{source}", &config.source_addr.to_string())
+        .replace("{bind}", &config.bind_addr.to_string())
+        .replace("{user}", &get_current_user()?)
+        .replace("{group}", &get_current_group()?);
+    
+    Ok(service_content)
+}
+```
+
+### Phase 3: Integration & Testing (P0) - 1週間
+
+**Week 5: 統合テスト・品質保証**
+
+```rust
+// tests/integration_tests.rs
+#[tokio::test]
+async fn test_daemonless_architecture_flow() {
+    // 1. conduit start でトンネルプロセス起動
+    let output = Command::new("target/debug/conduit")
+        .args(&["start", "--router", "127.0.0.1:9999", "--source", "127.0.0.1:8080", "--bind", "127.0.0.1:8081"])
+        .output()
+        .await
+        .expect("Failed to execute conduit start");
+    
+    assert!(output.status.success());
+    
+    // 2. conduit list でプロセス確認
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    
+    let output = Command::new("target/debug/conduit")
+        .args(&["list"])
+        .output()
+        .await
+        .expect("Failed to execute conduit list");
+    
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Active Tunnels"));
+    
+    // 3. conduit kill でプロセス終了
+    let output = Command::new("target/debug/conduit")
+        .args(&["kill", "--all"])
+        .output()
+        .await
+        .expect("Failed to execute conduit kill");
+    
+    assert!(output.status.success());
+}
+```
+
+### 依存関係追加
+
+```toml
+# Cargo.tomlに追加
+[dependencies]
+# 既存の依存関係...
+tonic = "0.10"
+prost = "0.12"
+prost-types = "0.12"
+dirs = "5.0"
+
+[build-dependencies]
+tonic-build = "0.10"
+```
 
 ```
 

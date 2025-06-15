@@ -1,16 +1,17 @@
  # Conduit プロジェクト - LLM コンテキスト
 
-最終更新: 2025-06-14 22:48 JST
+最終更新: 2025-06-15 03:42 JST
 更新者: LLM アシスタント
 
 ## プロジェクト概要
 
 ### 現在の状況
-- **ステータス**: 設計完成（実装開始可能）
+- **ステータス**: デーモンレスアーキテクチャ設計完成（実装開始可能）
 - **プロジェクトタイプ**: Rustで開発される企業級ネットワークトンネリングソフトウェア
 - **リポジトリ構造**: MicroRepositoryテンプレートベース
-- **主要ドキュメント**: `docs/architecture.md`に約36,000文字の完全な技術仕様が記載（71%削減済み）
+- **主要ドキュメント**: `docs/architecture.md`にデーモンレス設計を含む完全な技術仕様が記載
 - **ライセンス**: Apache 2.0 と SUSHI-WARE のデュアルライセンス
+- **アーキテクチャ**: Podmanライクなデーモンレス設計に決定
 
 ## プロジェクトの理解
 
@@ -27,29 +28,43 @@
 
 ## アーキテクチャ理解
 
-### 正しいシステム構成
+### デーモンレスアーキテクチャ設計（2025-06-15決定）
+Conduitは**Podmanライクなデーモンレス設計**を採用し、中央管理デーモンを持たず、独立したトンネルプロセスによる分散管理を実現します。
+
+### システム構成
 ```
 外部ネットワークユーザー (例: Browser)
     │
-    │ (Client の bind ポート経由でアクセス)
+    │ (Tunnel Process の bind ポート経由でアクセス)
     ▼
-┌─────────────────┐      ┌─────────────────────────────┐
-│ Conduit Client  │ ←TLS→│         Router              │
-│(外部公開側)     │      │(Routerと同一サブネット内)   │
-│ :80 (bind待受)  │      │ :9999 (Router待受)          │
-└─────────────────┘      │ :8080 (source転送先サービス)│
-                         └─────────────────────────────┘
+┌─────────────────────────────────┐      ┌─────────────────────────────┐
+│        Client Side              │      │        Router Side          │
+│                                 │      │                             │
+│  ┌─────────────┐  ┌─────────────┐│      │ ┌─────────────────────────┐ │
+│  │ CLI         │  │ Process     ││      │ │       Router            │ │
+│  │ Commands    │  │ Registry    ││      │ │   :9999 (待受)          │ │
+│  └─────────────┘  └─────────────┘│      │ │                         │ │
+│         │                │       │      │ └─────────────────────────┘ │
+│         │ gRPC           │ File  │      │             │               │
+│         ▼                ▼       │      │             ▼               │
+│  ┌─────────────────────────────┐ │ TLS  │ ┌─────────────────────────┐ │
+│  │    Tunnel Process          │ │◄────►│ │    Target Service       │ │
+│  │  :80 (bind待受)            │ │      │ │  :8080 (source)         │ │
+│  │  :50001 (gRPC)             │ │      │ └─────────────────────────┘ │
+│  └─────────────────────────────┘ │      │                             │
+└─────────────────────────────────┘      └─────────────────────────────┘
 ```
 
 ### 主要コンポーネント
-1. **Conduit Client**: 外部ユーザーからのアクセスを受け付けるエントリーポイント。`--bind`で外部接続を待ち受け、TLS暗号化してRouterに転送
-2. **Conduit Router**: プライベートネットワーク内の中継サーバー。Clientからの要求を受け付け、同一サブネット内のサービス(`--source`で指定)に転送
-3. **Router側サービス**: Router同一サブネット内の転送先サービス
+1. **CLI Commands**: ユーザーインターフェース、gRPC経由でTunnel Processと通信
+2. **Tunnel Process**: 独立したプロセスとしてトンネルを管理・実行、gRPCサーバーとしても動作
+3. **Process Registry**: ファイルベースのTunnel Process情報管理（`~/.conduit/tunnels/`）
+4. **Router**: プライベートネットワーク内の中継サーバー
 
-### 正しいデータフロー
-1. **トンネル確立**: Client → Router (TLS接続、Ed25519認証、トンネル要求)
-2. **データ転送**: 外部ユーザー → Client(`--bind`ポート) → Router(TLS) → Router側サービス(`--source`)
-3. **レスポンス**: Router側サービス → Router → Client(TLS) → 外部ユーザー
+### データフロー
+1. **トンネル確立**: `conduit start` → Tunnel Process起動 → Process Registry登録 → Router接続
+2. **データ転送**: 外部ユーザー → Tunnel Process(`--bind`) → Router(TLS) → Target Service(`--source`)
+3. **制御コマンド**: `conduit list/kill/status` → Process Registry検索 → gRPC通信 → 結果表示
 
 ## 技術スタック
 
@@ -58,6 +73,7 @@
 - **非同期ランタイム**: Tokio
 - **TLS実装**: rustls (TLS 1.3)
 - **暗号化**: Ed25519 (32バイト鍵、128bit相当セキュリティ)
+- **gRPC**: tonic, prost (プロトコルバッファ)
 - **CLI**: clap v4
 - **設定**: TOML (serde)
 - **コンテナ**: Docker, Kubernetes
@@ -68,9 +84,16 @@
 tokio = { version = "1.35", features = ["full"] }
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
 ed25519-dalek = { version = "2.0", features = ["rand_core"] }
+tonic = "0.10"
+prost = "0.12"
+prost-types = "0.12"
 clap = { version = "4.4", features = ["derive", "color", "suggestions"] }
 serde = { version = "1.0", features = ["derive"] }
+dirs = "5.0"
 # ... その他多数
+
+[build-dependencies]
+tonic-build = "0.10"
 ```
 
 ## コマンド仕様（シンプル化済み）
@@ -99,7 +122,7 @@ conduit <SUBCOMMAND> [OPTIONS]
 # 初期化
 conduit init
 
-# 単発トンネル（正しい仕様）
+# 単発トンネル（デーモンレス）
 conduit start --router 10.2.0.1:9999 \
               --source 10.2.0.2:8080 \
               --bind 0.0.0.0:80
@@ -109,6 +132,14 @@ conduit up -f conduit.toml
 
 # ルーター起動
 conduit router --bind 0.0.0.0:9999
+
+# 制御コマンド（gRPC経由）
+conduit list
+conduit kill --tunnel web-server-access
+conduit status
+
+# サービスファイル生成
+conduit start --service-file systemd --router 10.2.0.1:9999 --source 10.2.0.2:8080 --bind 0.0.0.0:80
 ```
 
 ## 設定システム
@@ -203,12 +234,29 @@ GET /api/v1/connections   # 接続一覧
 
 ## プロジェクト構造
 
-### ディレクトリ構成（予定）
+### デーモンレス実装ディレクトリ構成
 ```
 conduit/
 ├── Cargo.toml                     # プロジェクト設定
 ├── src/
 │   ├── main.rs                    # エントリポイント
+│   ├── grpc/                      # gRPC通信（CLI ↔ Tunnel Process）
+│   │   ├── mod.rs
+│   │   ├── server.rs              # gRPCサーバー実装
+│   │   ├── client.rs              # gRPCクライアント実装
+│   │   └── tunnel.proto           # プロトコル定義
+│   ├── registry/                  # Process Registry
+│   │   ├── mod.rs
+│   │   ├── manager.rs             # レジストリ管理
+│   │   └── process.rs             # プロセス情報
+│   ├── tunnel/                    # Tunnel Process
+│   │   ├── mod.rs
+│   │   ├── process.rs             # トンネルプロセス
+│   │   └── manager.rs             # トンネル管理
+│   ├── service/                   # サービスファイル生成
+│   │   ├── mod.rs
+│   │   ├── template.rs            # サービスファイルテンプレート
+│   │   └── generator.rs           # サービスファイル生成
 │   ├── cli/                       # CLI関連
 │   ├── client/                    # クライアント実装
 │   ├── router/                    # ルーター実装
@@ -216,34 +264,27 @@ conduit/
 │   ├── config/                    # 設定管理
 │   ├── protocol/                  # プロトコル実装
 │   ├── monitoring/                # 監視・メトリクス
-│   ├── api/                       # REST API
-│   └── utils/                     # ユーティリティ
+│   └── common/                    # 共通ユーティリティ
 ├── tests/                         # テスト
 ├── docs/                          # ドキュメント
-├── docker/                        # Docker関連
 └── .github/                       # CI/CD設定
 ```
 
-## 実装計画
+## デーモンレス実装計画（2025-06-15決定）
 
-### Phase 1: Core Implementation (P0) - 4週間
-- Week 1: 基盤実装（CLI、設定、エラーハンドリング）
-- Week 2: セキュリティ実装（TLS、Ed25519、認証）
-- Week 3: コア通信実装（プロトコル、基本トンネル機能）
-- Week 4: ルーター実装
+### Phase 1: gRPC Infrastructure (P0) - 2週間
+- Week 1: gRPCプロトコル定義とコード生成
+- Week 2: Process Registry実装
 
-### Phase 2: Essential Features (P0) - 3週間
-- Week 5-6: コマンド実装（init, start, up, router等）
-- Week 7: 監視・メトリクス基盤
+### Phase 2: Command Implementation (P0) - 2週間
+- Week 3: CLI Commands修正（バックグラウンドプロセス起動）
+- Week 4: Service File Generation機能
 
-### Phase 3: Advanced Features (P1) - 4週間
-- Week 8-9: ヘルスチェック・アラート
-- Week 10: API実装
-- Week 11: プロファイル管理
+### Phase 3: Integration & Testing (P0) - 1週間
+- Week 5: 統合テスト・品質保証
 
-### Phase 4: Production Features (P2) - 3週間
-- Week 12-13: 高度な監視機能
-- Week 14: 運用機能
+### Phase 4: Advanced Features (P1) - 2週間
+- Week 6-7: 監視・メトリクス、API実装
 
 ## テスト戦略
 
@@ -320,6 +361,61 @@ conduit/
 - **正しい仕様**: 外部ユーザー → Client(`--bind`) → Router(TLS) → Router側サービス(`--source`)
 - セキュリティ要件（TLS 1.3 + Ed25519）は妥協不可
 - パフォーマンス目標（10,000+接続、10Gbps+）を常に意識
+## デーモンレスアーキテクチャ設計学習（2025-06-15）
+
+### 重要な設計決定
+- **アーキテクチャ方針**: Podmanライクなデーモンレス設計を採用
+- **通信プロトコル**: CLI ↔ Tunnel Process間はgRPC（全プラットフォーム対応）
+- **プロセス管理**: ファイルベースのProcess Registry（`~/.conduit/tunnels/`）
+- **サービスファイル生成**: `--service-file`フラグで複数プラットフォーム対応
+
+### デーモンレス設計の利点
+- **シンプルな管理**: 中央管理デーモンが不要
+- **独立性**: 各トンネルが独立したプロセスとして動作
+- **スケーラビリティ**: プロセス単位での管理が可能
+- **障害分離**: 一つのトンネル障害が他に影響しない
+
+### gRPC API設計
+```protobuf
+service TunnelControl {
+  rpc GetStatus(StatusRequest) returns (StatusResponse);
+  rpc ListConnections(ListRequest) returns (ListResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+  rpc GetMetrics(MetricsRequest) returns (MetricsResponse);
+}
+```
+
+### Process Registry形式
+```json
+{
+  "tunnel_id": "web-server-access-1234",
+  "name": "web-server-access",
+  "pid": 12345,
+  "grpc_port": 50001,
+  "config": { "router": "10.2.0.1:9999", "source": "10.2.0.2:8080", "bind": "0.0.0.0:80" },
+  "status": "running",
+  "created_at": "2025-06-15T03:35:00Z"
+}
+```
+
+### サービスファイル生成対応
+- **systemd** (Linux)
+- **openrc** (Alpine Linux) 
+- **launchd** (macOS)
+- **rc.d** (FreeBSD)
+
+### 実装上の技術的課題
+- gRPCプロトコルバッファの適切な設計
+- プロセス間通信のエラーハンドリング
+- ファイルベースレジストリの排他制御
+- マルチプラットフォーム対応のサービスファイル生成
+
+### 開発チームへの引き継ぎ事項
+1. 既存のCLIコマンド実装を修正してgRPC通信に対応
+2. Process Registry機能の新規実装
+3. Tunnel Processのバックグラウンド起動機能
+4. サービスファイル生成機能の実装
+5. 統合テストによる動作確認
 - Docker/Kubernetes環境での動作を前提とした設計
 
 ### 重要な仕様変更（2025-06-14更新）
