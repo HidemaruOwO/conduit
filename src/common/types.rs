@@ -1,15 +1,14 @@
-//! Common types used throughout the application
+// アプリケーション全体で使用される共通型定義
 
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-/// Tunnel identifier
+// トンネル識別子
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TunnelId(pub Uuid);
 
 impl TunnelId {
-    /// Create a new tunnel ID
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
@@ -27,12 +26,11 @@ impl std::fmt::Display for TunnelId {
     }
 }
 
-/// Connection identifier
+// 接続識別子
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ConnectionId(pub Uuid);
 
 impl ConnectionId {
-    /// Create a new connection ID
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
@@ -50,18 +48,13 @@ impl std::fmt::Display for ConnectionId {
     }
 }
 
-/// Tunnel status
+// トンネルの状態
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TunnelStatus {
-    /// Tunnel is starting up
     Starting,
-    /// Tunnel is active and ready
     Active,
-    /// Tunnel is stopping
     Stopping,
-    /// Tunnel has stopped
     Stopped,
-    /// Tunnel is in error state
     Error(String),
 }
 
@@ -77,18 +70,13 @@ impl std::fmt::Display for TunnelStatus {
     }
 }
 
-/// Connection status
+// 接続の状態
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConnectionStatus {
-    /// Connection is being established
     Connecting,
-    /// Connection is active
     Active,
-    /// Connection is being closed
     Closing,
-    /// Connection is closed
     Closed,
-    /// Connection is in error state
     Error(String),
 }
 
@@ -104,7 +92,7 @@ impl std::fmt::Display for ConnectionStatus {
     }
 }
 
-/// Protocol type
+// プロトコル種別
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Protocol {
     Tcp,
@@ -132,46 +120,31 @@ impl std::str::FromStr for Protocol {
     }
 }
 
-/// Tunnel information
+// トンネル情報
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TunnelInfo {
-    /// Unique tunnel identifier
     pub id: TunnelId,
-    /// Human-readable tunnel name
     pub name: String,
-    /// Source service address (on router side)
+    // Router側のサービスアドレス
     pub source: SocketAddr,
-    /// Local bind address
+    // Clientのローカルバインドアドレス
     pub bind: SocketAddr,
-    /// Router address
     pub router: SocketAddr,
-    /// Protocol type
     pub protocol: Protocol,
-    /// Current status
     pub status: TunnelStatus,
-    /// Number of active connections
     pub active_connections: u32,
-    /// Total bytes transferred
     pub bytes_transferred: u64,
-    /// Tunnel creation time
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// Connection information
+// 接続情報
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionInfo {
-    /// Unique connection identifier
     pub id: ConnectionId,
-    /// Associated tunnel ID
     pub tunnel_id: TunnelId,
-    /// Client address
     pub client_addr: SocketAddr,
-    /// Target address
     pub target_addr: SocketAddr,
-    /// Current status
     pub status: ConnectionStatus,
-    /// Bytes transferred in this connection
     pub bytes_transferred: u64,
-    /// Connection establishment time
     pub connected_at: chrono::DateTime<chrono::Utc>,
 }

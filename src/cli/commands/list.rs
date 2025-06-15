@@ -1,10 +1,9 @@
-//! List command implementation
+// listコマンドの実装
 
 use crate::cli::ListArgs;
 use crate::cli::commands::CommandResult;
 use crate::common::error::Error;
 
-/// Execute the list command
 pub async fn execute(args: ListArgs) -> CommandResult {
     println!("📋 Listing active tunnels and connections");
     println!("Format: {}", args.format);
@@ -12,11 +11,11 @@ pub async fn execute(args: ListArgs) -> CommandResult {
     if args.tunnels {
         println!("Tunnels only");
     } else if args.connections {
-        println!("Connections only");  
+        println!("Connections only");
     } else {
         println!("All tunnels and connections");
     }
     
-    // TODO: Implement actual listing logic
+    // TODO: プロセスレジストリからトンネルプロセス情報をgRPC経由で取得
     Err(Error::generic("List command not yet implemented"))
 }

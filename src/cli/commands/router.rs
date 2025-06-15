@@ -1,11 +1,10 @@
-//! Router command implementation
+// routerコマンドの実装
 
 use crate::cli::RouterArgs;
 use crate::cli::commands::CommandResult;
 use crate::common::error::Error;
 use tracing::info;
 
-/// Execute the router command
 pub async fn execute(args: RouterArgs) -> CommandResult {
     info!("Starting router server on: {}", args.bind);
     
@@ -18,6 +17,6 @@ pub async fn execute(args: RouterArgs) -> CommandResult {
         println!("👻 Running in daemon mode");
     }
     
-    // TODO: Implement actual router server logic
+    // TODO: TLS 1.3 + Ed25519認証によるRouterサーバー実装
     Err(Error::generic("Router command not yet implemented"))
 }

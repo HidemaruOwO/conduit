@@ -1,4 +1,4 @@
-//! Config command implementation
+// configコマンドの実装
 
 use crate::cli::{ConfigArgs, ConfigAction};
 use crate::cli::commands::CommandResult;
@@ -7,7 +7,6 @@ use crate::common::error::Error;
 use std::path::PathBuf;
 use tracing::info;
 
-/// Execute the config command
 pub async fn execute(args: ConfigArgs) -> CommandResult {
     match args.action {
         ConfigAction::Show => show_config().await,
@@ -16,7 +15,6 @@ pub async fn execute(args: ConfigArgs) -> CommandResult {
     }
 }
 
-/// Show current configuration
 async fn show_config() -> CommandResult {
     let config_path = PathBuf::from("conduit.toml");
     
@@ -34,7 +32,6 @@ async fn show_config() -> CommandResult {
     Ok(())
 }
 
-/// Validate configuration file
 async fn validate_config(file: Option<PathBuf>) -> CommandResult {
     let config_path = file.unwrap_or_else(|| PathBuf::from("conduit.toml"));
     
@@ -63,7 +60,6 @@ async fn validate_config(file: Option<PathBuf>) -> CommandResult {
     Ok(())
 }
 
-/// Generate sample configuration
 async fn generate_config(output: Option<PathBuf>) -> CommandResult {
     let output_path = output.unwrap_or_else(|| PathBuf::from("conduit-sample.toml"));
     

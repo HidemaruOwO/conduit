@@ -1,6 +1,6 @@
-//! プロトコルテスト
-//!
-//! コア通信プロトコルの基本テスト
+// プロトコルテスト
+//
+// Router-Client間のコア通信プロトコルの基本テスト
 
 use conduit::protocol::{Message, MessageType, MessagePayload};
 use conduit::protocol::messages::{Heartbeat, ClientRegister};
@@ -18,7 +18,7 @@ async fn test_basic_message_serialization() {
     
     let message = Message::new(MessageType::Heartbeat, heartbeat);
     
-    // JSONシリアライゼーションテスト
+    // JSON形式でのシリアライゼーション・デシリアライゼーション検証
     let json = message.to_json().unwrap();
     let deserialized = Message::from_json(&json).unwrap();
     
@@ -40,9 +40,9 @@ async fn test_client_register_message() {
     
     let message = Message::new(MessageType::ClientRegister, register);
     
-    // メッセージバリデーション
+    // 正常なサイズ制限でのバリデーション
     assert!(message.validate(1024 * 1024).is_ok());
     
-    // 小さすぎるサイズ制限でのエラーテスト
+    // サイズ制限超過時のエラーハンドリング検証
     assert!(message.validate(100).is_err());
 }

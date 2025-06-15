@@ -1,6 +1,6 @@
-//! Conduit - High-performance network tunneling software
-//!
-//! This is the main entry point for the Conduit CLI application.
+// Conduit - 高性能ネットワークトンネリングソフトウェア
+//
+// ConduitのCLIアプリケーションのメインエントリポイント
 
 use clap::{Parser, Subcommand};
 use std::process;
@@ -13,12 +13,10 @@ use cli::{CliArgs, Commands};
 
 #[tokio::main]
 async fn main() {
-    // Initialize logging
     init_logging();
     
     let args = CliArgs::parse();
     
-    // Execute subcommand
     let result = match args.command {
         Commands::Init(cmd) => cli::commands::init::execute(cmd).await,
         Commands::Start(cmd) => cli::commands::start::execute(cmd).await,
@@ -32,7 +30,6 @@ async fn main() {
         Commands::Version => cli::commands::version::execute().await,
     };
 
-    // Error handling
     if let Err(e) = result {
         error!("Command execution failed: {}", e);
         eprintln!("Error: {}", e);
@@ -40,7 +37,6 @@ async fn main() {
     }
 }
 
-/// Initialize the logging system
 fn init_logging() {
     tracing_subscriber::fmt()
         .with_env_filter(

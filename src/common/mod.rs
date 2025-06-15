@@ -1,7 +1,6 @@
-//! Common functionality shared across the application
-//!
-//! This module contains shared types, utilities, and functionality
-//! used throughout the Conduit application.
+// アプリケーション全体で共有される共通機能
+//
+// Conduitアプリケーション全体で使用される共有型、ユーティリティ、機能を含む
 
 pub mod config;
 pub mod error;

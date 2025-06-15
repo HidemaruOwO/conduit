@@ -1,10 +1,10 @@
-//! Status command implementation
+// statusコマンドの実装
 
 use crate::cli::StatusArgs;
 use crate::cli::commands::CommandResult;
 use crate::common::error::Error;
 
-/// Execute the status command
+// システム状況を確認するコマンドを実行
 pub async fn execute(args: StatusArgs) -> CommandResult {
     println!("📊 System Status");
     println!("Format: {}", args.format);
@@ -13,6 +13,6 @@ pub async fn execute(args: StatusArgs) -> CommandResult {
         println!("Detailed information requested");
     }
     
-    // TODO: Implement actual status checking logic
+    // TODO: プロセスレジストリとgRPC通信でシステム全体の状況確認
     Err(Error::generic("Status command not yet implemented"))
 }

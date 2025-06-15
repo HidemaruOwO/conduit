@@ -1,65 +1,49 @@
-//! Configuration management for Conduit
-//!
-//! This module handles loading and managing configuration from multiple sources:
-//! CLI arguments > Environment variables > Configuration file > Defaults
+// Conduitの設定管理
+//
+// 複数のソースから設定を読み込み管理：
+// CLI引数 > 環境変数 > 設定ファイル > デフォルト値
 
 use crate::common::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-/// Main configuration structure
+// メイン設定構造体
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// Router configuration
     pub router: RouterConfig,
-    
-    /// Security configuration
     pub security: SecurityConfig,
-    
-    /// Tunnel configurations
     pub tunnels: Vec<TunnelConfig>,
 }
 
-/// Router server configuration
+// Routerサーバー設定
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterConfig {
-    /// Router server host
     pub host: String,
-    
-    /// Router server port
     pub port: u16,
 }
 
-/// Security configuration
+// セキュリティ設定
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityConfig {
-    /// Path to private key file
     pub private_key_path: PathBuf,
-    
-    /// Path to public key file (optional)
     pub public_key_path: Option<PathBuf>,
 }
 
-/// Individual tunnel configuration
+// 個別トンネル設定
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TunnelConfig {
-    /// Tunnel identifier name
     pub name: String,
-    
-    /// Source service address on router side
+    // Router側のサービスアドレス
     pub source: String,
-    
-    /// Local bind address for incoming connections
+    // Clientのローカルバインドアドレス
     pub bind: String,
-    
-    /// Protocol (tcp or udp)
     #[serde(default = "default_protocol")]
     pub protocol: String,
 }
 
 impl Config {
-    /// Load configuration from file
+    // ファイルから設定を読み込み
     pub fn from_file(path: &PathBuf) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| Error::config(format!("Failed to read config file: {}", e)))?;
@@ -71,7 +55,7 @@ impl Config {
         Ok(config)
     }
     
-    /// Save configuration to file
+    // 設定をファイルに保存
     pub fn to_file(&self, path: &PathBuf) -> Result<()> {
         let content = toml::to_string_pretty(self)
             .map_err(|e| Error::config(format!("Failed to serialize config: {}", e)))?;
@@ -82,7 +66,7 @@ impl Config {
         Ok(())
     }
     
-    /// Create a default configuration
+    // デフォルト設定を作成
     pub fn default() -> Self {
         Config {
             router: RouterConfig {
@@ -104,7 +88,7 @@ impl Config {
         }
     }
     
-    /// Generate sample configuration
+    // サンプル設定を生成（architecture.mdの仕様に準拠）
     pub fn sample() -> Self {
         Config {
             router: RouterConfig {
@@ -132,9 +116,8 @@ impl Config {
         }
     }
     
-    /// Validate configuration
+    // 設定の妥当性を検証
     pub fn validate(&self) -> Result<()> {
-        // Validate router configuration
         if self.router.host.is_empty() {
             return Err(Error::config("Router host cannot be empty"));
         }
@@ -143,7 +126,6 @@ impl Config {
             return Err(Error::config("Router port cannot be 0"));
         }
         
-        // Validate tunnels
         if self.tunnels.is_empty() {
             return Err(Error::config("At least one tunnel must be configured"));
         }
@@ -152,24 +134,24 @@ impl Config {
         let mut bind_addresses = std::collections::HashSet::new();
         
         for tunnel in &self.tunnels {
-            // Check for duplicate tunnel names
+            // 重複チェック：トンネル名
             if !tunnel_names.insert(&tunnel.name) {
                 return Err(Error::config(format!("Duplicate tunnel name: {}", tunnel.name)));
             }
             
-            // Check for duplicate bind addresses
+            // 重複チェック：バインドアドレス
             if !bind_addresses.insert(&tunnel.bind) {
                 return Err(Error::config(format!("Duplicate bind address: {}", tunnel.bind)));
             }
             
-            // Validate addresses
+            // アドレス形式の検証
             tunnel.source.parse::<SocketAddr>()
                 .map_err(|_| Error::config(format!("Invalid source address: {}", tunnel.source)))?;
             
             tunnel.bind.parse::<SocketAddr>()
                 .map_err(|_| Error::config(format!("Invalid bind address: {}", tunnel.bind)))?;
             
-            // Validate protocol
+            // プロトコルの検証
             match tunnel.protocol.as_str() {
                 "tcp" | "udp" => {},
                 _ => return Err(Error::config(format!("Invalid protocol: {}", tunnel.protocol))),
@@ -179,7 +161,7 @@ impl Config {
         Ok(())
     }
     
-    /// Get router socket address
+    // RouterのSocketAddrを取得
     pub fn router_addr(&self) -> SocketAddr {
         format!("{}:{}", self.router.host, self.router.port)
             .parse()
@@ -188,7 +170,7 @@ impl Config {
 }
 
 impl RouterConfig {
-    /// Create from environment variables
+    // 環境変数からRouter設定を作成
     pub fn from_env() -> Self {
         RouterConfig {
             host: std::env::var("CONDUIT_ROUTER_HOST")
@@ -202,7 +184,7 @@ impl RouterConfig {
 }
 
 impl SecurityConfig {
-    /// Create from environment variables
+    // 環境変数からセキュリティ設定を作成
     pub fn from_env() -> Self {
         SecurityConfig {
             private_key_path: std::env::var("CONDUIT_SECURITY_PRIVATE_KEY_PATH")
@@ -215,7 +197,7 @@ impl SecurityConfig {
     }
 }
 
-/// Default protocol for tunnels
+// トンネルのデフォルトプロトコル
 fn default_protocol() -> String {
     "tcp".to_string()
 }

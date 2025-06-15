@@ -1,7 +1,7 @@
-//! Client module for Conduit
-//!
-//! This module implements the client-side functionality that connects to routers
-//! and manages tunnels for forwarding traffic.
+// Client module for Conduit
+//
+// This module implements the client-side functionality that connects to routers
+// and manages tunnels for forwarding traffic.
 
 pub mod tunnel;
 pub mod connection;
