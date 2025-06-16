@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-// メイン設定構造体
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub router: RouterConfig,
@@ -16,21 +15,18 @@ pub struct Config {
     pub tunnels: Vec<TunnelConfig>,
 }
 
-// Routerサーバー設定
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouterConfig {
     pub host: String,
     pub port: u16,
 }
 
-// セキュリティ設定
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityConfig {
     pub private_key_path: PathBuf,
     pub public_key_path: Option<PathBuf>,
 }
 
-// 個別トンネル設定
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TunnelConfig {
     pub name: String,
@@ -43,7 +39,6 @@ pub struct TunnelConfig {
 }
 
 impl Config {
-    // ファイルから設定を読み込み
     pub fn from_file(path: &PathBuf) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| Error::config(format!("Failed to read config file: {}", e)))?;
@@ -55,7 +50,6 @@ impl Config {
         Ok(config)
     }
     
-    // 設定をファイルに保存
     pub fn to_file(&self, path: &PathBuf) -> Result<()> {
         let content = toml::to_string_pretty(self)
             .map_err(|e| Error::config(format!("Failed to serialize config: {}", e)))?;
@@ -66,7 +60,6 @@ impl Config {
         Ok(())
     }
     
-    // デフォルト設定を作成
     pub fn default() -> Self {
         Config {
             router: RouterConfig {
@@ -116,7 +109,6 @@ impl Config {
         }
     }
     
-    // 設定の妥当性を検証
     pub fn validate(&self) -> Result<()> {
         if self.router.host.is_empty() {
             return Err(Error::config("Router host cannot be empty"));
@@ -134,24 +126,20 @@ impl Config {
         let mut bind_addresses = std::collections::HashSet::new();
         
         for tunnel in &self.tunnels {
-            // 重複チェック：トンネル名
             if !tunnel_names.insert(&tunnel.name) {
                 return Err(Error::config(format!("Duplicate tunnel name: {}", tunnel.name)));
             }
             
-            // 重複チェック：バインドアドレス
             if !bind_addresses.insert(&tunnel.bind) {
                 return Err(Error::config(format!("Duplicate bind address: {}", tunnel.bind)));
             }
             
-            // アドレス形式の検証
             tunnel.source.parse::<SocketAddr>()
                 .map_err(|_| Error::config(format!("Invalid source address: {}", tunnel.source)))?;
             
             tunnel.bind.parse::<SocketAddr>()
                 .map_err(|_| Error::config(format!("Invalid bind address: {}", tunnel.bind)))?;
             
-            // プロトコルの検証
             match tunnel.protocol.as_str() {
                 "tcp" | "udp" => {},
                 _ => return Err(Error::config(format!("Invalid protocol: {}", tunnel.protocol))),

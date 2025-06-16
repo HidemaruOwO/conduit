@@ -4,10 +4,8 @@
 
 use thiserror::Error;
 
-// アプリケーション全体のResult型
 pub type Result<T> = std::result::Result<T, Error>;
 
-// Conduitのメインエラー型
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Configuration error: {0}")]
@@ -78,7 +76,6 @@ impl Error {
     }
 }
 
-// anyhow::Errorからの変換
 impl From<anyhow::Error> for Error {
     fn from(err: anyhow::Error) -> Self {
         Error::Generic(err.to_string())

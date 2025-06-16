@@ -1,7 +1,6 @@
-// Client module for Conduit
+// Conduitのクライアントモジュール
 //
-// This module implements the client-side functionality that connects to routers
-// and manages tunnels for forwarding traffic.
+// Routerに接続してトンネルを管理するクライアント側機能を実装
 
 pub mod tunnel;
 pub mod connection;
@@ -17,7 +16,6 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, error, instrument};
 
-/// Conduit client
 pub struct Client {
     config: ClientConfig,
     tunnel_manager: TunnelManager,
@@ -25,13 +23,10 @@ pub struct Client {
 }
 
 impl Client {
-    /// Create a new client
     pub fn new(config: ClientConfig) -> Result<Self> {
-        // TLS設定を作成
         let tls_config = TlsClientConfig::new(&config.security.tls)
             .map_err(|e| crate::common::error::Error::Security(format!("TLS config error: {}", e)))?;
         
-        // 認証マネージャーを作成
         // 簡略化: デフォルト値でAuthManagerを作成
         let key_manager = crate::security::KeyManager::new(
             "./keys",
@@ -41,7 +36,6 @@ impl Client {
         let token_duration = std::time::Duration::from_secs(1800);
         let auth_manager = Arc::new(AuthManager::new(key_manager, session_timeout, token_duration));
         
-        // トンネルマネージャーを作成
         let tunnel_manager = TunnelManager::new(tls_config, auth_manager);
         
         Ok(Self {
@@ -51,12 +45,10 @@ impl Client {
         })
     }
     
-    /// Start the client
     #[instrument(skip(self))]
     pub async fn start(&mut self) -> Result<()> {
         info!("Starting Conduit client: {}", self.config.client.name);
         
-        // 接続マネージャーを作成・開始
         let connection_config = self.config.to_connection_config();
         let tls_config = TlsClientConfig::new(&self.config.security.tls)
             .map_err(|e| crate::common::error::Error::Security(format!("TLS config error: {}", e)))?;
@@ -74,17 +66,13 @@ impl Client {
             auth_manager,
         );
         
-        // イベント処理チャンネル
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         connection_manager.set_event_channel(event_tx);
         
-        // 接続マネージャーを開始
         connection_manager.start().await?;
         
-        // トンネルマネージャーに接続マネージャーを設定
         self.tunnel_manager.set_connection_manager(connection_manager).await;
         
-        // 設定されたトンネルを開始
         for tunnel_config in &self.config.tunnels {
             if tunnel_config.enabled {
                 if let Err(e) = self.start_tunnel(tunnel_config).await {
@@ -93,7 +81,6 @@ impl Client {
             }
         }
         
-        // イベント処理ループ
         tokio::spawn(async move {
             while let Some(event) = event_rx.recv().await {
                 match event {
@@ -126,7 +113,6 @@ impl Client {
         Ok(())
     }
     
-    /// Start a specific tunnel
     async fn start_tunnel(&self, tunnel_config: &TunnelConfig) -> Result<()> {
         let protocol = match tunnel_config.protocol.as_str() {
             "tcp" => crate::common::types::Protocol::Tcp,
@@ -154,12 +140,10 @@ impl Client {
         Ok(())
     }
     
-    /// Stop the client
     #[instrument(skip(self))]
     pub async fn stop(&mut self) -> Result<()> {
         info!("Stopping Conduit client");
         
-        // すべてのトンネルを停止
         let tunnels = self.tunnel_manager.list_tunnels();
         for tunnel in tunnels {
             if let Err(e) = self.tunnel_manager.remove_tunnel(&tunnel.id).await {
@@ -167,7 +151,6 @@ impl Client {
             }
         }
         
-        // 接続マネージャーを停止
         if let Some(ref connection_manager) = self.connection_manager {
             connection_manager.stop().await?;
         }
@@ -176,7 +159,6 @@ impl Client {
         Ok(())
     }
     
-    /// Get client statistics
     pub fn get_stats(&self) -> ClientStats {
         let tunnels = self.tunnel_manager.list_tunnels();
         let running_tunnels = self.tunnel_manager.get_running_tunnels();
@@ -189,12 +171,10 @@ impl Client {
         }
     }
     
-    /// List all tunnels
     pub fn list_tunnels(&self) -> Vec<crate::common::types::TunnelInfo> {
         self.tunnel_manager.list_tunnels()
     }
     
-    /// Get connection state
     pub async fn connection_state(&self) -> Option<crate::protocol::ConnectionState> {
         if let Some(ref connection_manager) = self.connection_manager {
             Some(connection_manager.connection_state().await)

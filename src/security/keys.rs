@@ -13,7 +13,6 @@ use tracing::{debug, info, warn, error};
 
 use super::crypto::{Ed25519KeyPair, Ed25519Error};
 
-/// 鍵管理関連のエラー
 #[derive(Debug, thiserror::Error)]
 pub enum KeyError {
     #[error("Key generation error: {message}")]

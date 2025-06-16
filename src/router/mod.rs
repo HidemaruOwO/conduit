@@ -1,49 +1,41 @@
-// Router module for Conduit
+// ConduitのRouterモジュール
 //
-// This module implements the router-side functionality that accepts client connections
-// and forwards traffic to target services.
+// Client接続を受け入れ、ターゲットサービスにトラフィックを転送するRouter側機能を実装
 
 use crate::common::error::Result;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-/// Router configuration
 pub struct RouterConfig {
-    /// Address to bind the router server
     pub bind_addr: SocketAddr,
-    /// Private key path for TLS
     pub private_key_path: Option<PathBuf>,
 }
 
-/// Conduit router server
 pub struct Router {
     config: RouterConfig,
 }
 
 impl Router {
-    /// Create a new router
     pub fn new(config: RouterConfig) -> Self {
         Self { config }
     }
     
-    /// Start the router server
     pub async fn start(&self) -> Result<()> {
         tracing::info!("Starting Conduit Router on {}", self.config.bind_addr);
         
-        // TODO: Implement actual router server logic
-        // 1. Setup TLS configuration
-        // 2. Start listening for client connections
-        // 3. Handle tunnel establishment requests
-        // 4. Manage active tunnels and connections
+        // TODO: TLS 1.3 + Ed25519認証によるRouterサーバー実装
+        // 1. TLS設定のセットアップ
+        // 2. Client接続の待機開始
+        // 3. トンネル確立要求の処理
+        // 4. アクティブトンネルと接続の管理
         
         Ok(())
     }
     
-    /// Stop the router server
     pub async fn stop(&self) -> Result<()> {
         tracing::info!("Stopping Conduit Router");
         
-        // TODO: Implement graceful shutdown logic
+        // TODO: グレースフルシャットダウンロジック実装
         
         Ok(())
     }

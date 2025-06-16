@@ -15,7 +15,6 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use base64::Engine;
 
-/// Ed25519関連のエラー
 #[derive(Debug, thiserror::Error)]
 pub enum Ed25519Error {
     #[error("Key generation error: {message}")]
