@@ -8,6 +8,8 @@ pub mod router;
 pub mod common;
 pub mod protocol;
 pub mod security;
+pub mod registry;
+pub mod ipc;
 
 pub use common::{
     config::Config,
