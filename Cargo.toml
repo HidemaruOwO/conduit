@@ -25,6 +25,16 @@ exclude = [
 # 非同期ランタイム
 tokio = { version = "1.35", features = ["full"] }
 tokio-rustls = "0.24"
+tokio-stream = "0.1"
+
+# SQLite Registry (Podman bolt_state.dbパターン)
+sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-rustls", "migrate", "chrono"] }
+
+# gRPC over UDS
+tonic = "0.10"
+prost = "0.12"
+prost-types = "0.12"
+futures = "0.3"
 
 # TLS・暗号化
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
@@ -58,6 +68,7 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 dashmap = "5.5"
 base64 = "0.21"
+dirs = "5.0"
 
 # ネットワーク・HTTP (P1機能用)
 reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false, optional = true }
@@ -71,6 +82,7 @@ sysinfo = { version = "0.29", optional = true }
 
 [build-dependencies]
 vergen = { version = "8.2", features = ["build", "git", "gitcl", "cargo", "rustc", "sysinfo"] }
+tonic-build = "0.10"
 
 [dev-dependencies]
 tokio-test = "0.4"
