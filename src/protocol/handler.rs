@@ -23,10 +23,8 @@ use crate::protocol::{
 use crate::security::{TlsClientConfig, AuthManager, SecurityResult};
 use crate::common::error::Result;
 
-/// プロトコルハンドラー設定
 #[derive(Debug, Clone)]
 pub struct ProtocolHandlerConfig {
-    /// 接続タイムアウト（秒）
     pub connect_timeout_seconds: u64,
     
     /// メッセージタイムアウト（秒）

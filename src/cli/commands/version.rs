@@ -2,7 +2,6 @@
 
 use crate::cli::commands::CommandResult;
 
-// バージョン情報を表示するコマンドを実行
 pub async fn execute() -> CommandResult {
     println!("conduit {}", env!("CARGO_PKG_VERSION"));
     println!("Build date: {}", env!("VERGEN_BUILD_DATE"));

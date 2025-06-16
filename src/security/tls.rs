@@ -13,7 +13,6 @@ use rustls::{
 use rustls_pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
-/// TLS関連のエラー
 #[derive(Debug, thiserror::Error)]
 pub enum TlsError {
     #[error("TLS configuration error: {message}")]
@@ -35,31 +34,16 @@ pub enum TlsError {
     FileOperation { message: String },
 }
 
-/// TLSの結果型
 pub type TlsResult<T> = Result<T, TlsError>;
 
-/// TLS設定
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TlsConfig {
-    /// サーバー証明書ファイルパス
     pub cert_file: Option<String>,
-    
-    /// サーバー秘密鍵ファイルパス
     pub key_file: Option<String>,
-    
-    /// CA証明書ファイルパス
     pub ca_cert_file: Option<String>,
-    
-    /// クライアント証明書検証を有効にするか
     pub require_client_cert: bool,
-    
-    /// サーバー証明書検証を有効にするか
     pub verify_server_cert: bool,
-    
-    /// サポートするTLSバージョン
     pub min_tls_version: String,
-    
-    /// 許可する暗号スイート
     pub cipher_suites: Vec<String>,
 }
 

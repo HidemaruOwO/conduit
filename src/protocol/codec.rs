@@ -9,7 +9,6 @@ use std::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::protocol::messages::{Message, ProtocolError};
 
-/// コーデックエラー
 #[derive(Debug, thiserror::Error)]
 pub enum CodecError {
     #[error("IO error: {0}")]

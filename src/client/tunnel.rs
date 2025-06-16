@@ -1,4 +1,4 @@
-// Tunnel implementation for client
+// Clientのトンネル実装
 
 use crate::common::{error::Result, types::*};
 use crate::protocol::{ProtocolHandler, Message, MessageType, MessagePayload, TunnelCreate};
@@ -10,7 +10,6 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 use tracing::{debug, info, warn, error, instrument};
 
-/// Tunnel manager for client
 pub struct TunnelManager {
     tunnels: dashmap::DashMap<TunnelId, TunnelInfo>,
     connection_manager: Arc<Mutex<Option<ConnectionManager>>>,
@@ -19,7 +18,6 @@ pub struct TunnelManager {
 }
 
 impl TunnelManager {
-    /// Create a new tunnel manager
     pub fn new(
         tls_config: TlsClientConfig,
         auth_manager: Arc<AuthManager>,

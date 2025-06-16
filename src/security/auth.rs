@@ -14,7 +14,6 @@ use uuid::Uuid;
 use super::crypto::{Ed25519Signature, verify_signature};
 use super::keys::KeyManager;
 
-/// 認証関連のエラー
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
     #[error("Authentication failed: {message}")]

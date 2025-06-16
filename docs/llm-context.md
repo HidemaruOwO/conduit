@@ -491,6 +491,45 @@ service TunnelControl {
 - コードを読まずに理解できる情報を提供
 
 ### 実装状況
-- **ステータス**: コメント最適化作業実行中
+- **ステータス**: コメント最適化作業完了
 - **対象ファイル**: 全Rustソースファイル（src/以下、tests/、build.rs）
+- **処理済みファイル数**: 37ファイル
 - **実行日**: 2025-06-16
+
+#### 具体的な清掃例
+**削除された不要なコメント例**:
+```rust
+// 削除前
+/// TLSの結果型
+pub type TlsResult<T> = Result<T, TlsError>;
+
+/// TLS設定
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TlsConfig {
+    /// サーバー証明書ファイルパス
+    pub cert_file: Option<String>,
+
+// 削除後
+pub type TlsResult<T> = Result<T, TlsError>;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TlsConfig {
+    pub cert_file: Option<String>,
+```
+
+**保持された重要なコメント例**:
+```rust
+// セキュリティのためUnixでファイル権限を適切に設定
+#[cfg(unix)]
+{
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = fs::metadata(&private_key_path)?.permissions();
+    perms.set_mode(0o600); // 秘密鍵は所有者のみ読取可能
+}
+```
+
+#### 清掃効果
+- コードの可読性向上
+- メンテナンス性向上（コードと重複する情報の削除）
+- 重要な設計意図の明確化
+- 日本語でのコメント統一完了

@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use uuid::Uuid;
 
-// トンネル識別子
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TunnelId(pub Uuid);
 
@@ -26,7 +25,6 @@ impl std::fmt::Display for TunnelId {
     }
 }
 
-// 接続識別子
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ConnectionId(pub Uuid);
 
@@ -48,7 +46,6 @@ impl std::fmt::Display for ConnectionId {
     }
 }
 
-// トンネルの状態
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TunnelStatus {
     Starting,
@@ -70,7 +67,6 @@ impl std::fmt::Display for TunnelStatus {
     }
 }
 
-// 接続の状態
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConnectionStatus {
     Connecting,
@@ -92,7 +88,6 @@ impl std::fmt::Display for ConnectionStatus {
     }
 }
 
-// プロトコル種別
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Protocol {
     Tcp,
@@ -120,7 +115,6 @@ impl std::str::FromStr for Protocol {
     }
 }
 
-// トンネル情報
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TunnelInfo {
     pub id: TunnelId,
@@ -137,7 +131,6 @@ pub struct TunnelInfo {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-// 接続情報
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionInfo {
     pub id: ConnectionId,
