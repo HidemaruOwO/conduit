@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package tunnel;
+
+// TunnelControl Service - Tunnel ProcessとCLI間の通信
+service TunnelControl {
+  // トンネル状態取得
+  rpc GetStatus(StatusRequest) returns (StatusResponse);
+  
+  // アクティブ接続一覧取得
+  rpc ListConnections(ListRequest) returns (ListResponse);
+  
+  // トンネル停止
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+  
+  // メトリクス取得（ストリーミング）
+  rpc GetMetricsStream(MetricsRequest) returns (stream MetricsResponse);
+}
+
+// StatusRequest - 状態取得リクエスト
+message StatusRequest {
+  // 空のリクエスト
+}
+
+// StatusResponse - 状態レスポンス
+message StatusResponse {
+  TunnelInfo tunnel_info = 1;
+  repeated ConnectionInfo connections = 2;
+  TunnelMetrics metrics = 3;
+}
+
+// ListRequest - 接続一覧リクエスト
+message ListRequest {
+  // 空のリクエスト
+}
+
+// ListResponse - 接続一覧レスポンス
+message ListResponse {
+  repeated ConnectionInfo connections = 1;
+}
+
+// ShutdownRequest - 停止リクエスト
+message ShutdownRequest {
+  bool force = 1;           // 強制停止フラグ
+  int32 timeout_seconds = 2; // タイムアウト秒数
+}
+
+// ShutdownResponse - 停止レスポンス
+message ShutdownResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// MetricsRequest - メトリクス取得リクエスト
+message MetricsRequest {
+  // 空のリクエスト
+}
+
+// MetricsResponse - メトリクス応答
+message MetricsResponse {
+  TunnelMetrics metrics = 1;
+  int64 timestamp = 2;
+}
+
+// TunnelInfo - トンネル基本情報
+message TunnelInfo {
+  string id = 1;              // トンネルID
+  string name = 2;            // トンネル名
+  string router_addr = 3;     // Router接続先アドレス
+  string source_addr = 4;     // Router側サービスアドレス（--source）
+  string bind_addr = 5;       // バインドアドレス（--bind）
+  int32 status = 6;           // Podmanライクな状態（1=Created, 3=Running, 5=Exited）
+  int64 created_at = 7;       // 作成日時（Unix timestamp）
+  int64 updated_at = 8;       // 更新日時（Unix timestamp）
+  int32 pid = 9;              // プロセスID
+  string socket_path = 10;    // Unix Domain Socket パス
+}
+
+// ConnectionInfo - 接続情報
+message ConnectionInfo {
+  string id = 1;              // 接続ID
+  string client_addr = 2;     // クライアントアドレス
+  string target_addr = 3;     // ターゲットアドレス
+  int64 connected_at = 4;     // 接続開始時刻
+  int64 bytes_sent = 5;       // 送信バイト数
+  int64 bytes_received = 6;   // 受信バイト数
+  string status = 7;          // 接続状態
+}
+
+// TunnelMetrics - トンネルメトリクス
+message TunnelMetrics {
+  int32 active_connections = 1;     // アクティブ接続数
+  int64 total_connections = 2;      // 総接続数
+  int64 total_bytes_sent = 3;       // 総送信バイト数
+  int64 total_bytes_received = 4;   // 総受信バイト数
+  double cpu_usage = 5;             // CPU使用率（%）
+  int64 memory_usage = 6;           // メモリ使用量（bytes）
+  int64 uptime_seconds = 7;         // 稼働時間（秒）
+  double avg_latency_ms = 8;        // 平均レイテンシ（ms）
+}
