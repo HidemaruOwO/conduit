@@ -11,7 +11,11 @@ pub mod tunnel {
     tonic::include_proto!("tunnel");
 }
 
-pub use tunnel::*;
+pub use tunnel::{
+    tunnel_control_server::{TunnelControl, TunnelControlServer},
+    tunnel_control_client::TunnelControlClient,
+    *
+};
 
 // UDS専用チャンネル作成ヘルパー
 pub async fn create_uds_channel(socket_path: &Path) -> Result<Channel> {
@@ -128,7 +132,7 @@ pub mod response_builders {
 
 // エラーハンドリング用のヘルパー
 pub mod error_handling {
-    use tonic::{Code, Status};
+    use tonic::Status;
     use anyhow::Error;
 
     // anyhow::Errorをtonic::Statusに変換
