@@ -25,7 +25,7 @@ exclude = [
 # 非同期ランタイム
 tokio = { version = "1.35", features = ["full"] }
 tokio-rustls = "0.24"
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["net"] }
 
 # SQLite Registry (Podman bolt_state.dbパターン)
 sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-rustls", "migrate", "chrono"] }
@@ -35,6 +35,7 @@ tonic = "0.10"
 prost = "0.12"
 prost-types = "0.12"
 futures = "0.3"
+tower = "0.4"
 
 # TLS・暗号化
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
@@ -69,6 +70,10 @@ chrono = { version = "0.4", features = ["serde"] }
 dashmap = "5.5"
 base64 = "0.21"
 dirs = "5.0"
+
+# Unix系システム用
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.27", features = ["signal"] }
 
 # ネットワーク・HTTP (P1機能用)
 reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false, optional = true }
