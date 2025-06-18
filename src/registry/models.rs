@@ -3,8 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use std::collections::HashMap;
 use std::path::PathBuf;
+use base64::Engine;
 
 // Podmanライクなトンネル状態（数値管理）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -135,16 +135,19 @@ impl TunnelEntry {
         use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
         use ring::rand::{SecureRandom, SystemRandom};
 
-        let unbound_key = UnboundKey::new(&AES_256_GCM, key)?;
+        let unbound_key = UnboundKey::new(&AES_256_GCM, key)
+            .map_err(|_| anyhow::anyhow!("Failed to create encryption key"))?;
         let key = LessSafeKey::new(unbound_key);
         
         let rng = SystemRandom::new();
         let mut nonce_bytes = [0u8; 12];
-        rng.fill(&mut nonce_bytes)?;
+        rng.fill(&mut nonce_bytes)
+            .map_err(|_| anyhow::anyhow!("Failed to generate random nonce"))?;
         let nonce = Nonce::assume_unique_for_key(nonce_bytes);
         
         let mut in_out = config_json.as_bytes().to_vec();
-        key.seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out)?;
+        key.seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out)
+            .map_err(|_| anyhow::anyhow!("Failed to encrypt data"))?;
         
         // nonceとciphertextを結合して保存
         let mut result = nonce_bytes.to_vec();
@@ -165,11 +168,13 @@ impl TunnelEntry {
             nonce_bytes.try_into().map_err(|_| anyhow::anyhow!("Invalid nonce length"))?
         );
 
-        let unbound_key = UnboundKey::new(&AES_256_GCM, key)?;
+        let unbound_key = UnboundKey::new(&AES_256_GCM, key)
+            .map_err(|_| anyhow::anyhow!("Failed to create decryption key"))?;
         let key = LessSafeKey::new(unbound_key);
         
         let mut in_out = ciphertext.to_vec();
-        let plaintext = key.open_in_place(nonce, Aad::empty(), &mut in_out)?;
+        let plaintext = key.open_in_place(nonce, Aad::empty(), &mut in_out)
+            .map_err(|_| anyhow::anyhow!("Failed to decrypt data"))?;
         
         Ok(String::from_utf8(plaintext.to_vec())?)
     }
