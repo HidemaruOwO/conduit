@@ -1,14 +1,14 @@
 // Unix Domain Socket gRPCサーバー
 // Tunnel ProcessとCLI Commands間の通信サーバー
 
-use crate::ipc::protocol::{self, tunnel::*};
-use crate::registry::models::*;
+use crate::ipc::protocol::{self, tunnel::*, TunnelControl, TunnelControlServer};
+use crate::registry::models::{TunnelInfo as RegistryTunnelInfo, TunnelMetrics as RegistryTunnelMetrics, ConnectionInfo as RegistryConnectionInfo, TunnelStatus, TunnelConfig};
 use anyhow::Result;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{transport::Server, Request, Response, Status, Streaming};
+use tonic::{transport::Server, Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
 // UDS gRPCサーバー実装
@@ -52,7 +52,7 @@ impl UdsGrpcServer {
 
         // gRPCサーバーの設定と起動
         Server::builder()
-            .add_service(TunnelControlServer::new(Arc::clone(&self.tunnel_service)))
+            .add_service(TunnelControlServer::new((*self.tunnel_service).clone()))
             .serve_with_incoming(incoming)
             .await?;
 
@@ -74,18 +74,19 @@ impl UdsGrpcServer {
 }
 
 // TunnelControl gRPCサービス実装
+#[derive(Clone)]
 pub struct TunnelControlService {
     tunnel_id: String,
-    tunnel_info: Arc<RwLock<TunnelInfo>>,
-    connections: Arc<RwLock<Vec<ConnectionInfo>>>,
-    metrics: Arc<RwLock<TunnelMetrics>>,
+    tunnel_info: Arc<RwLock<RegistryTunnelInfo>>,
+    connections: Arc<RwLock<Vec<RegistryConnectionInfo>>>,
+    metrics: Arc<RwLock<RegistryTunnelMetrics>>,
     shutdown_signal: Arc<RwLock<Option<tokio::sync::oneshot::Sender<()>>>>,
 }
 
 impl TunnelControlService {
     pub fn new(tunnel_id: String) -> Result<Self> {
         // 初期のトンネル情報を設定
-        let tunnel_info = TunnelInfo {
+        let tunnel_info = RegistryTunnelInfo {
             id: tunnel_id.clone(),
             name: "unknown".to_string(),
             pid: Some(std::process::id()),
@@ -103,32 +104,32 @@ impl TunnelControlService {
             updated_at: chrono::Utc::now().timestamp(),
             last_activity: chrono::Utc::now().timestamp(),
             exit_code: None,
-            metrics: TunnelMetrics::default(),
+            metrics: RegistryTunnelMetrics::default(),
         };
 
         Ok(Self {
             tunnel_id,
             tunnel_info: Arc::new(RwLock::new(tunnel_info)),
             connections: Arc::new(RwLock::new(Vec::new())),
-            metrics: Arc::new(RwLock::new(TunnelMetrics::default())),
+            metrics: Arc::new(RwLock::new(RegistryTunnelMetrics::default())),
             shutdown_signal: Arc::new(RwLock::new(None)),
         })
     }
 
     // トンネル情報の更新
-    pub async fn update_tunnel_info(&self, info: TunnelInfo) {
+    pub async fn update_tunnel_info(&self, info: RegistryTunnelInfo) {
         let mut tunnel_info = self.tunnel_info.write().await;
         *tunnel_info = info;
     }
 
     // 接続情報の更新
-    pub async fn update_connections(&self, connections: Vec<ConnectionInfo>) {
+    pub async fn update_connections(&self, connections: Vec<RegistryConnectionInfo>) {
         let mut conn_guard = self.connections.write().await;
         *conn_guard = connections;
     }
 
     // メトリクスの更新
-    pub async fn update_metrics(&self, metrics: TunnelMetrics) {
+    pub async fn update_metrics(&self, metrics: RegistryTunnelMetrics) {
         let mut metrics_guard = self.metrics.write().await;
         *metrics_guard = metrics;
     }
@@ -216,7 +217,7 @@ impl TunnelControl for TunnelControlService {
     async fn get_metrics_stream(
         &self,
         _request: Request<MetricsRequest>,
-    ) -> Result<Response<Self::GetMetricsStreamStream>, Status> {
+    ) -> Result<Response<ReceiverStream<Result<MetricsResponse, Status>>>, Status> {
         debug!("Received GetMetricsStream request for tunnel: {}", self.tunnel_id);
 
         let (tx, rx) = tokio::sync::mpsc::channel(100);
@@ -342,7 +343,19 @@ mod tests {
             ..Default::default()
         };
         
-        service.update_metrics(new_metrics.clone()).await;
+        // TunnelMetrics型の変換が必要
+        let registry_metrics = RegistryTunnelMetrics {
+            active_connections: u32::try_from(new_metrics.active_connections.max(0)).unwrap_or(0),
+            total_connections: u64::try_from(new_metrics.total_connections.max(0)).unwrap_or(0),
+            total_bytes_sent: u64::try_from(new_metrics.total_bytes_sent.max(0)).unwrap_or(0),
+            total_bytes_received: u64::try_from(new_metrics.total_bytes_received.max(0)).unwrap_or(0),
+            cpu_usage: new_metrics.cpu_usage,
+            memory_usage: u64::try_from(new_metrics.memory_usage.max(0)).unwrap_or(0),
+            uptime_seconds: u64::try_from(new_metrics.uptime_seconds.max(0)).unwrap_or(0),
+            avg_latency_ms: new_metrics.avg_latency_ms,
+            error_rate: 0.0, // gRPCプロトコルにはerror_rateがないのでデフォルト値
+        };
+        service.update_metrics(registry_metrics).await;
         
         let stored_metrics = service.metrics.read().await.clone();
         assert_eq!(stored_metrics.active_connections, 5);
