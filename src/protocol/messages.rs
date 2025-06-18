@@ -61,18 +61,15 @@ pub struct Message {
     /// タイムスタンプ
     pub timestamp: DateTime<Utc>,
     
-    /// メッセージタイプとペイロード
-    #[serde(flatten)]
+    /// メッセージタイプ
     pub message_type: MessageType,
     
     /// メッセージペイロード
-    #[serde(flatten)]
     pub payload: MessagePayload,
 }
 
 /// メッセージペイロード
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
 pub enum MessagePayload {
     ClientRegister(ClientRegister),
     TunnelCreate(TunnelCreate),
@@ -390,7 +387,11 @@ mod tests {
         
         assert_eq!(message.id, deserialized.id);
         assert_eq!(message.version, deserialized.version);
-        assert_eq!(message.message_type, deserialized.message_type);
+        // message_typeフィールドは削除されたため、payloadで判定
+        match (&message.payload, &deserialized.payload) {
+            (MessagePayload::Heartbeat(_), MessagePayload::Heartbeat(_)) => {},
+            _ => panic!("Message payload type mismatch"),
+        }
     }
 
     #[test]
