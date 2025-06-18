@@ -1,7 +1,7 @@
 // UDS gRPCクライアント
 // CLI CommandsからTunnel Processへの通信クライアント
 
-use crate::ipc::protocol::{self, tunnel::*, create_uds_channel};
+use crate::ipc::protocol::{tunnel::*, create_uds_channel, TunnelControlClient};
 use anyhow::{Context, Result};
 use std::path::Path;
 use std::time::Duration;
