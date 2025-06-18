@@ -2,10 +2,11 @@
 
 use crate::common::{error::Result, types::*};
 use crate::protocol::{ProtocolHandler, Message, MessageType, MessagePayload, TunnelCreate};
-use crate::security::{TlsClientConfig, AuthManager};
+use crate::security::{TlsClientConfig, AuthManager, TlsConfig, KeyManager, KeyRotationConfig};
 use crate::client::connection::ConnectionManager;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use tracing::{debug, info, warn, error, instrument};
@@ -92,7 +93,7 @@ impl TunnelManager {
         let connection_guard = self.connection_manager.lock().await;
         
         if let Some(ref connection_manager) = *connection_guard {
-            let tunnel_create = MessagePayload::TunnelCreate(TunnelCreate {
+            let tunnel_create = TunnelCreate {
                 tunnel_id: Uuid::parse_str(&tunnel_id.to_string())
                     .map_err(|e| crate::common::error::Error::Protocol(format!("Invalid tunnel ID: {}", e)))?,
                 tunnel_name: name.to_string(),
@@ -105,9 +106,10 @@ impl TunnelManager {
                     buffer_size: 65536,
                     compression_enabled: false,
                 },
-            });
+            };
             
-            let message = Message::new(MessageType::TunnelCreate, tunnel_create);
+            let payload = MessagePayload::TunnelCreate(tunnel_create);
+            let message = Message::new(MessageType::TunnelCreate, payload);
             
             let response = connection_manager.send_message(message).await?;
             
@@ -214,8 +216,14 @@ mod tests {
     use crate::security::{TlsConfig, AuthManager};
 
     fn create_test_tunnel_manager() -> TunnelManager {
-        let tls_config = TlsClientConfig::new(TlsConfig::default()).unwrap();
-        let auth_manager = Arc::new(AuthManager::new());
+        let tls_config = TlsClientConfig::new(&TlsConfig::default()).unwrap();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let key_manager = KeyManager::new(temp_dir.path(), KeyRotationConfig::default()).unwrap();
+        let auth_manager = Arc::new(AuthManager::new(
+            key_manager,
+            Duration::from_secs(3600), // session_timeout
+            Duration::from_secs(1800), // token_duration
+        ));
         TunnelManager::new(tls_config, auth_manager)
     }
 
@@ -246,7 +254,7 @@ mod tests {
         let manager = create_test_tunnel_manager();
         
         // 空の状態をテスト
-        assert_eq!(manager.get_tunnel_count_by_status(TunnelStatus::Running), 0);
+        assert_eq!(manager.get_tunnel_count_by_status(TunnelStatus::Active), 0);
         assert_eq!(manager.get_running_tunnels().len(), 0);
         
         let fake_tunnel_id = TunnelId::new();
