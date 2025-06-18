@@ -5,11 +5,11 @@ use crate::registry::{models::*, sqlite::SqliteRegistry};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{RwLock, Mutex};
-use tokio::time::{interval, sleep};
+use tokio::sync::RwLock;
+use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
 // プロセス管理構造体
@@ -24,7 +24,7 @@ pub struct ProcessManager {
 #[derive(Debug, Clone)]
 struct ProcessInfo {
     tunnel_id: String,
-    process_handle: Arc<Mutex<Option<Arc<Mutex<Child>>>>>,
+    pid: u32,
     socket_path: PathBuf,
     started_at: Instant,
     last_health_check: Instant,
@@ -79,7 +79,7 @@ impl ProcessManager {
         cmd.env("CONDUIT_SOCKET_PATH", &socket_path);
 
         // プロセス起動
-        let mut child = cmd.spawn()
+        let child = cmd.spawn()
             .context("Failed to spawn tunnel process")?;
 
         let pid = child.id();
@@ -95,9 +95,14 @@ impl ProcessManager {
         ).await?;
 
         // プロセス情報を管理対象に追加
+        let pid = child.id();
+        
+        // プロセスをデタッチして独立実行させる
+        std::mem::forget(child);
+        
         let process_info = ProcessInfo {
             tunnel_id: tunnel_id.clone(),
-            process_handle: Arc::new(Mutex::new(Some(Arc::new(Mutex::new(child))))),
+            pid,
             socket_path,
             started_at: Instant::now(),
             last_health_check: Instant::now(),
@@ -126,62 +131,17 @@ impl ProcessManager {
                 None,
             ).await?;
 
-            let mut child_guard = info.process_handle.lock().await;
-            if let Some(ref mut child) = child_guard.as_mut() {
-                if force {
-                    // 強制終了
-                    child.kill().context("Failed to kill tunnel process")?;
-                } else {
-                    // グレースフル停止の試行
-                    #[cfg(unix)]
-                    {
-                        use nix::sys::signal::{kill, Signal};
-                        use nix::unistd::Pid;
-                        
-                        if let Some(pid) = child.id() {
-                            kill(Pid::from_raw(pid as i32), Signal::SIGTERM)
-                                .context("Failed to send SIGTERM")?;
-                            
-                            // グレースフル停止の待機（最大10秒）
-                            let mut attempts = 0;
-                            while attempts < 10 {
-                                match child.try_wait()? {
-                                    Some(_) => break,
-                                    None => {
-                                        sleep(Duration::from_millis(1000)).await;
-                                        attempts += 1;
-                                    }
-                                }
-                            }
-                            
-                            // まだ生きている場合は強制終了
-                            if child.try_wait()?.is_none() {
-                                warn!("Process {} did not respond to SIGTERM, killing", tunnel_id);
-                                child.kill()?;
-                            }
-                        }
-                    }
-                    
-                    #[cfg(windows)]
-                    {
-                        // Windows版では直接killを使用
-                        child.kill().context("Failed to kill tunnel process")?;
-                    }
-                }
-
-                // プロセス終了の待機
-                let exit_status = child.wait().context("Failed to wait for process exit")?;
-                let exit_code = exit_status.code().unwrap_or(-1);
-
-                // レジストリ状態を終了に更新
-                self.registry.update_tunnel_status(
-                    tunnel_id,
-                    if exit_code == 0 { TunnelStatus::Exited } else { TunnelStatus::Error },
-                    Some(exit_code),
-                ).await?;
-
-                info!("Tunnel process {} stopped with exit code: {}", tunnel_id, exit_code);
-            }
+            // プロセス終了シグナル送信
+            let success = Self::kill_process(info.pid, force).await;
+            
+            let exit_code = if success { 0 } else { -1 };
+            
+            // レジストリ状態を終了に更新
+            self.registry.update_tunnel_status(
+                tunnel_id,
+                if success { TunnelStatus::Exited } else { TunnelStatus::Error },
+                Some(exit_code),
+            ).await?;
 
             // プロセス情報を削除
             self.running_processes.write().await.remove(tunnel_id);
@@ -189,10 +149,36 @@ impl ProcessManager {
             // ソケットファイルのクリーンアップ
             let _ = tokio::fs::remove_file(&info.socket_path).await;
 
+            info!("Tunnel process {} stopped with exit code: {}", tunnel_id, exit_code);
             Ok(true)
         } else {
             warn!("Tunnel process {} not found in running processes", tunnel_id);
             Ok(false)
+        }
+    }
+
+    // プロセス終了処理
+    async fn kill_process(pid: u32, force: bool) -> bool {
+        #[cfg(unix)]
+        {
+            use nix::sys::signal::{kill, Signal};
+            use nix::unistd::Pid;
+            
+            let signal = if force { Signal::SIGKILL } else { Signal::SIGTERM };
+            match kill(Pid::from_raw(pid as i32), signal) {
+                Ok(()) => true,
+                Err(_) => false,
+            }
+        }
+        
+        #[cfg(windows)]
+        {
+            // Windows版の実装
+            use std::process::Command;
+            let result = Command::new("taskkill")
+                .args(&[if force { "/F" } else { "/T" }, "/PID", &pid.to_string()])
+                .output();
+            result.is_ok()
         }
     }
 
@@ -279,43 +265,26 @@ impl ProcessManager {
         // 実行中プロセスの生存確認
         let mut dead_processes = Vec::new();
         {
-            let mut processes_guard = processes.write().await;
-            let mut to_remove = Vec::new();
+            let processes_guard = processes.read().await;
             
-            for (tunnel_id, info) in processes_guard.iter_mut() {
-                let mut child_guard = info.process_handle.lock().await;
-                if let Some(ref mut child) = child_guard.as_mut() {
-                    match child.try_wait() {
-                        Ok(Some(exit_status)) => {
-                            // プロセスが終了している
-                            let exit_code = exit_status.code().unwrap_or(-1);
-                            dead_processes.push((tunnel_id.clone(), exit_code));
-                            to_remove.push(tunnel_id.clone());
-                        }
-                        Ok(None) => {
-                            // プロセスはまだ実行中
-                        }
-                        Err(_) => {
-                            // プロセス状態取得エラー（おそらく終了済み）
-                            dead_processes.push((tunnel_id.clone(), -1));
-                            to_remove.push(tunnel_id.clone());
-                        }
-                    }
+            for (tunnel_id, info) in processes_guard.iter() {
+                if !Self::process_exists(info.pid) {
+                    dead_processes.push(tunnel_id.clone());
                 }
-            }
-            
-            for id in to_remove {
-                processes_guard.remove(&id);
             }
         }
 
-        // デッドプロセスのレジストリ状態更新
-        for (tunnel_id, exit_code) in dead_processes {
-            let status = if exit_code == 0 { TunnelStatus::Exited } else { TunnelStatus::Error };
-            if let Err(e) = registry.update_tunnel_status(&tunnel_id, status, Some(exit_code)).await {
-                error!("Failed to update status for dead process {}: {}", tunnel_id, e);
-            } else {
-                info!("Cleaned up dead process: {} (exit code: {})", tunnel_id, exit_code);
+        // デッドプロセスのレジストリ状態更新とクリーンアップ
+        if !dead_processes.is_empty() {
+            let mut processes_guard = processes.write().await;
+            for tunnel_id in dead_processes {
+                let status = TunnelStatus::Exited;
+                if let Err(e) = registry.update_tunnel_status(&tunnel_id, status, Some(-1)).await {
+                    error!("Failed to update status for dead process {}: {}", tunnel_id, e);
+                } else {
+                    info!("Cleaned up dead process: {}", tunnel_id);
+                }
+                processes_guard.remove(&tunnel_id);
             }
         }
 
@@ -400,10 +369,7 @@ impl ProcessManager {
             let uptime = info.started_at.elapsed();
             let process_stats = ProcessStats {
                 tunnel_id: tunnel_id.clone(),
-                pid: {
-                    let child_guard = info.process_handle.lock().await;
-                    child_guard.as_ref().and_then(|c| c.id()).map(|id| id as u32)
-                },
+                pid: Some(info.pid),
                 uptime_seconds: uptime.as_secs(),
                 restart_count: info.restart_count,
                 last_health_check: info.last_health_check.elapsed().as_secs(),
@@ -413,6 +379,27 @@ impl ProcessManager {
         }
         
         stats
+    }
+
+    // プロセス存在確認（マルチプラットフォーム対応）
+    pub fn process_exists(pid: u32) -> bool {
+        #[cfg(unix)]
+        {
+            std::path::Path::new(&format!("/proc/{}", pid)).exists()
+        }
+
+        #[cfg(windows)]
+        {
+            use std::process::Command;
+            Command::new("tasklist")
+                .args(&["/FI", &format!("PID eq {}", pid)])
+                .output()
+                .map(|output| {
+                    String::from_utf8_lossy(&output.stdout)
+                        .contains(&pid.to_string())
+                })
+                .unwrap_or(false)
+        }
     }
 }
 
