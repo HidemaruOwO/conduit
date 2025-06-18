@@ -148,15 +148,8 @@ BEGIN
     VALUES ('UPDATE', 'clients', NEW.id, unixepoch('now'), 'SYSTEM_TIMEOUT');
 END;
 
--- WALモード有効化（セキュア設定）
-PRAGMA journal_mode=WAL;
-PRAGMA synchronous=FULL;                -- クラッシュ安全性最大化
-PRAGMA cache_size=5000;                 -- メモリ使用量制限
-PRAGMA temp_store=memory;
-PRAGMA mmap_size=134217728;             -- 128MB mmap（制限値）
-PRAGMA auto_vacuum=FULL;                -- フラグメンテーション対策
-PRAGMA secure_delete=ON;                -- 削除データのゼロ書き込み
-PRAGMA foreign_keys=ON;                 -- 外部キー制約有効化
+-- PRAGMA文はマイグレーション外で実行する必要があるため削除
+-- これらの設定はSQLiteRegistry::newで個別に実行される
 
 -- 初期設定メタデータ
 INSERT OR IGNORE INTO config_metadata (key_id, algorithm, key_rotation_at, created_at)
