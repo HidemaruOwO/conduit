@@ -20,7 +20,7 @@ use crate::protocol::{
     Message, MessageType, MessagePayload, ProtocolError,
     MessageCodec, CodecError, ProtocolResult, ProtocolModuleError,
 };
-use crate::security::{TlsClientConfig, AuthManager, SecurityResult};
+use crate::security::{TlsClientConfig, AuthManager, SecurityResult, TlsConfig, KeyManager, KeyRotationConfig};
 use crate::common::error::Result;
 
 #[derive(Debug, Clone)]
@@ -459,8 +459,14 @@ mod tests {
 
     fn create_test_handler() -> ProtocolHandler {
         let config = ProtocolHandlerConfig::default();
-        let tls_config = TlsClientConfig::new(TlsConfig::default()).unwrap();
-        let auth_manager = Arc::new(AuthManager::new());
+        let tls_config = TlsClientConfig::new(&TlsConfig::default()).unwrap();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let key_manager = KeyManager::new(temp_dir.path(), KeyRotationConfig::default()).unwrap();
+        let auth_manager = Arc::new(AuthManager::new(
+            key_manager,
+            Duration::from_secs(3600),
+            Duration::from_secs(1800),
+        ));
         
         ProtocolHandler::new(config, tls_config, auth_manager)
     }
