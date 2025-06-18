@@ -13,9 +13,9 @@ use tracing::{debug, info, warn, error, instrument};
 
 use crate::protocol::{
     ProtocolHandler, ProtocolHandlerConfig, ConnectionState,
-    Message, MessageType, MessagePayload,
+    Message, MessageType, MessagePayload, Heartbeat,
 };
-use crate::security::{TlsClientConfig, AuthManager};
+use crate::security::{TlsClientConfig, AuthManager, TlsConfig, KeyManager, KeyRotationConfig};
 use crate::common::error::Result;
 
 /// 接続管理設定
@@ -330,15 +330,16 @@ impl ConnectionManager {
             let mut connection_guard = connection.lock().await;
             if let Some(ref mut stream) = *connection_guard {
                 // ハートビートメッセージ作成
-                let heartbeat = MessagePayload::Heartbeat(crate::protocol::messages::Heartbeat {
+                let heartbeat = Heartbeat {
                     client_id,
                     active_tunnels: 0, // TODO: 実際の値を取得
                     active_connections: 0, // TODO: 実際の値を取得
                     cpu_usage: 0.0, // TODO: 実際の値を取得
                     memory_usage: 0, // TODO: 実際の値を取得
-                });
+                };
                 
-                let message = Message::new(MessageType::Heartbeat, heartbeat);
+                let payload = MessagePayload::Heartbeat(heartbeat);
+                let message = Message::new(MessageType::Heartbeat, payload);
                 
                 // NOTE: この部分は実際の実装では異なる方法が必要
                 // 現在はコンパイルエラーを避けるため簡略化
@@ -453,8 +454,14 @@ mod tests {
 
     fn create_test_connection_manager() -> ConnectionManager {
         let config = ConnectionConfig::default();
-        let tls_config = TlsClientConfig::new(TlsConfig::default()).unwrap();
-        let auth_manager = Arc::new(AuthManager::new());
+        let tls_config = TlsClientConfig::new(&TlsConfig::default()).unwrap();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let key_manager = KeyManager::new(temp_dir.path(), KeyRotationConfig::default()).unwrap();
+        let auth_manager = Arc::new(AuthManager::new(
+            key_manager,
+            Duration::from_secs(3600),
+            Duration::from_secs(1800),
+        ));
         
         ConnectionManager::new(config, tls_config, auth_manager)
     }
