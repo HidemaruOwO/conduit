@@ -223,7 +223,7 @@ mod tests {
     use super::*;
     use crate::protocol::messages::{MessageType, MessagePayload, Heartbeat};
     use uuid::Uuid;
-    use tokio::io::Cursor;
+    use std::io::Cursor;
 
     fn create_test_message() -> Message {
         let payload = MessagePayload::Heartbeat(Heartbeat {
