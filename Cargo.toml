@@ -47,6 +47,9 @@ rand = "0.8"
 
 # CLI
 clap = { version = "4.4", features = ["derive", "color", "suggestions"] }
+comfy-table = "7.0"  # 表形式表示
+indicatif = "0.17"   # プログレスバー
+dialoguer = "0.11"   # 対話的プロンプト
 
 # 設定・シリアライゼーション
 serde = { version = "1.0", features = ["derive"] }

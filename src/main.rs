@@ -2,14 +2,10 @@
 //
 // ConduitのCLIアプリケーションのメインエントリポイント
 
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use std::process;
 use tracing::{error, info};
-
-mod cli;
-mod common;
-
-use cli::{CliArgs, Commands};
+use conduit::cli::{CliArgs, Commands};
 
 #[tokio::main]
 async fn main() {
@@ -18,16 +14,16 @@ async fn main() {
     let args = CliArgs::parse();
     
     let result = match args.command {
-        Commands::Init(cmd) => cli::commands::init::execute(cmd).await,
-        Commands::Start(cmd) => cli::commands::start::execute(cmd).await,
-        Commands::Up(cmd) => cli::commands::up::execute(cmd).await,
-        Commands::Down(cmd) => cli::commands::down::execute(cmd).await,
-        Commands::Router(cmd) => cli::commands::router::execute(cmd).await,
-        Commands::List(cmd) => cli::commands::list::execute(cmd).await,
-        Commands::Kill(cmd) => cli::commands::kill::execute(cmd).await,
-        Commands::Status(cmd) => cli::commands::status::execute(cmd).await,
-        Commands::Config(cmd) => cli::commands::config::execute(cmd).await,
-        Commands::Version => cli::commands::version::execute().await,
+        Commands::Init(cmd) => conduit::cli::commands::init::execute(cmd).await,
+        Commands::Start(cmd) => conduit::cli::commands::start::execute(cmd).await,
+        Commands::Up(cmd) => conduit::cli::commands::up::execute(cmd).await,
+        Commands::Down(cmd) => conduit::cli::commands::down::execute(cmd).await,
+        Commands::Router(cmd) => conduit::cli::commands::router::execute(cmd).await,
+        Commands::List(cmd) => conduit::cli::commands::list::execute(cmd).await,
+        Commands::Kill(cmd) => conduit::cli::commands::kill::execute(cmd).await,
+        Commands::Status(cmd) => conduit::cli::commands::status::execute(cmd).await,
+        Commands::Config(cmd) => conduit::cli::commands::config::execute(cmd).await,
+        Commands::Version => conduit::cli::commands::version::execute().await,
     };
 
     if let Err(e) = result {
